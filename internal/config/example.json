@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "poll_interval": "1s",
+  "request_timeout": "5s",
+  "max_attempts": 5,
+  "destinations": [
+    {"id":"feishu-team", "kind":"feishu", "enabled":false, "url":"${BLIP_FEISHU_URL}", "secret":"${BLIP_FEISHU_SECRET}"},
+    {"id":"wecom-team", "kind":"wecom", "enabled":false, "url":"${BLIP_WECOM_URL}"},
+    {"id":"gotify-phone", "kind":"gotify", "enabled":false, "url":"${BLIP_GOTIFY_URL}", "token":"${BLIP_GOTIFY_TOKEN}", "priority":5},
+    {"id":"custom", "kind":"webhook", "enabled":false, "url":"${BLIP_WEBHOOK_URL}", "token":"${BLIP_WEBHOOK_TOKEN}", "headers":{"X-Source":"Blip"}}
+  ]
+}

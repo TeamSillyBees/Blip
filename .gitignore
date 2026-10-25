@@ -1,0 +1,10 @@
+/bin/
+/dist/
+/config.json
+/data/
+*.exe
+*.test
+*.out
+.env
+.env.*
+!.env.example

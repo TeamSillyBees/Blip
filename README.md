@@ -1,0 +1,108 @@
+# Blip
+
+把 Codex 需要你关注的消息，发送到飞书、企业微信、Gotify 或自定义 webhook。
+
+首版面向 **Windows 上的 Codex CLI 与桌面版**，提供三类提醒：
+
+| 提醒 | 触发依据 |
+| --- | --- |
+| 本轮完成 | 根会话中带会话、轮次标识的正常 `task_complete` 记录 |
+| 审批申请 | 官方 `PermissionRequest` hook 实际触发 |
+| 需要输入 | `request_user_input` / `request_user_input_async` 的 `PreToolUse` |
+
+“本轮完成”表示一次回复正常结束。审批覆盖取决于 Codex 的实际 hook 路径，完整边界见[兼容性与验证](docs/compatibility.md)。普通正文问句、其他 coding agent、远程审批和通知模板编辑器不在首版范围。
+
+Hook 安装按 Codex `0.163.0` 的配置协议实现；更早版本需要另行验证，桌面版与 CLI 的实机证据分别记录在兼容性说明中。
+
+## 开始使用
+
+需要 Go 1.25 或更新版本构建；运行生成的程序不需要安装 Go。
+
+```powershell
+go build -o bin/blip.exe ./cmd/blip
+.\bin\blip.exe init
+```
+
+配置默认保存在 `%APPDATA%\Blip\config.json`。将示例中的至少一个目的地改为 `"enabled": true`，填入 URL 与凭据，或设置它引用的环境变量。[配置示例](internal/config/example.json)中的所有目的地默认关闭。
+
+例如，启用飞书群机器人时，在运行 `start` 的终端设置：
+
+```powershell
+$env:BLIP_FEISHU_URL = 'https://open.feishu.cn/open-apis/bot/v2/hook/替换为你的地址'
+$env:BLIP_FEISHU_SECRET = '替换为机器人签名密钥'
+.\bin\blip.exe install codex
+.\bin\blip.exe start
+.\bin\blip.exe test
+.\bin\blip.exe status
+```
+
+未启用飞书签名时，删去该目的地的 `secret` 字段，或将它设为 `""`。安装命令会增量写入 Codex `hooks.json`，保留其他 hook 并备份原文件。随后在 **Codex 中审阅并信任新 hook**，必要时重开既有会话。当前 Codex 默认启用 hooks；如果配置显式关闭，安装命令会提示先在 Codex 中启用，不会改写 `config.toml` 或信任记录。
+
+请将程序放在固定位置后再执行安装；移动程序或更换配置路径后，重新安装 hook。
+
+`start` 在 Windows 隐藏窗口启动后台进程；首次运行只为已有会话建立读取基线，不发送历史完成消息。之后的读取位置与待发通知保存在配置目录下的 `data` 中，停止期间的新记录会在重启后继续读取。首版不设置开机自启，重新登录系统后需要再次启动。
+
+## 命令
+
+```text
+blip [--config PATH] COMMAND
+
+init                生成配置示例
+install codex       安装输入与审批 hook
+uninstall codex     仅移除本配置安装的 Blip hook
+start / stop        启动后台进程 / 请求平稳停止
+run                 在当前终端运行
+status              显示运行状态与待发、已送达、失败投递数量
+test                向所有启用的目的地排入一条测试通知
+version             显示版本
+```
+
+`--config` 放在命令之前。例如：
+
+```powershell
+.\bin\blip.exe --config 'D:\我的工具\Blip\config.json' start
+```
+
+配置变更后执行 `stop`、`start` 生效。后台进程在启动时解析密钥环境变量；hook、停止、卸载和状态查询无需读取这些密钥。`codex_home` 默认为环境变量 `CODEX_HOME`，未设置时使用 `~/.codex`；也可以在配置中指定。`state_dir` 默认为配置文件同目录下的 `data`。相对路径以配置文件目录为基准。
+
+## 通知目的地
+
+同一渠道可以配置多个不同 `id` 的目的地，三类事件发送到所有启用的目的地。`id` 是投递账本的身份，建议保持稳定。
+
+| `kind` | 配置 | 成功判定 |
+| --- | --- | --- |
+| `feishu` | 群自定义机器人的 `url`，可选 `secret` | HTTP 2xx 且 JSON `code: 0` |
+| `wecom` | 企业微信群机器人的完整 `url`，包含 key | HTTP 2xx 且 JSON `errcode: 0` |
+| `gotify` | 服务根 `url`、应用 `token`，可选 `priority`（默认 5） | HTTP 2xx 且返回有效消息 ID |
+| `webhook` | `url`，可选 `token` 或 `headers` | HTTP 2xx |
+
+Gotify 的 `url` 可以包含反向代理子路径，Blip 会在其后追加 `/message`。使用应用 token。自定义 webhook 的 `token` 对应 `Authorization: Bearer ...`，也可以通过 `headers` 指定鉴权；两者不要重复配置 Authorization。
+
+URL、token、secret、header 值都支持 `${环境变量名}`。启用的目的地引用缺失变量时，后台进程拒绝启动；关闭的示例无需准备凭据。不要把填有真实密钥的配置提交到版本库。
+
+通知默认包含项目、会话、轮次、发生时间和简短详情。完成附回复摘要，输入附问题与选项，审批附工具与申请原因。中文与 emoji 按 UTF-8 安全截断，企业微信文本限制为 2048 字节；飞书同时限制编码后的请求体大小。
+
+自定义 webhook 的固定版本格式见 [webhook 协议](docs/webhook.md)。
+
+## 投递与恢复
+
+Hook 只快速入队，不在 Codex 回调中请求外部网络。每个目的地有独立发送循环、超时与收据；一个渠道的慢请求不会占用其他渠道的发送循环。企业微信与飞书分别留有最低发送间隔，降低触发服务频率限制的概率。
+
+默认请求超时 5 秒，最多尝试 5 次，重试退避为 5、10、20、40 秒，上限 1 分钟。HTTP 408、425、429、5xx、传输失败和机器人业务失败可重试；其他 HTTP 4xx 直接记为失败。`request_timeout`、`poll_interval` 和 `max_attempts` 可在配置中调整。
+
+有原生请求标识时按标识去重；没有请求标识的审批按内容和 10 秒时间桶尽力合并，跨桶或重复申请仍可能提醒多次。正常完成按会话和轮次去重。投递为**至少一次**：外部接收成功后、本地记账前崩溃，重启可能再次发送。自定义接收端可使用 `X-Blip-Event-Id` 去重。
+
+待发与暂时停用目的地的记录保留到可继续投递；已送达或重试耗尽的记录保留 7 天。`status` 的 `failed` 非零时，可在 `data/jobs/` 查看对应收据的错误码。修复配置后，新增事件会使用新配置；首版没有失败记录的手动重放命令。
+
+`data/worker.log` 记录运行错误，不记录 URL、token、签名密钥或渠道响应正文。队列包含通知摘要，读取位置记录包含本地项目路径，请按本地配置数据管理。
+
+## 开发
+
+```powershell
+go test ./...
+go vet ./...
+```
+
+测试覆盖四类渠道协议、错误响应、Unicode 字节限制、并发去重、独立收据、重试、读取位置恢复，以及真实进程的中文与空格路径、安装卸载、后台启动停止。集成测试仅使用临时 Codex home 和本地 HTTP 服务。`go test -short ./...` 可跳过进程集成测试；具备 C 编译器的环境可运行 `go test -race ./...`。
+
+项目约定见[首版需求](docs/requirements.md)、[术语表](GLOSSARY.md)和[架构决策](docs/adr/)。本项目参考 [hellolib/agent-notify](https://github.com/hellolib/agent-notify/tree/ed2842189eff44009a7bbe946b8a1b29bbc983d4) 的适配器、统一消息与渠道发送器分工，代码独立实现。依赖许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

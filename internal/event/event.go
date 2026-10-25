@@ -1,0 +1,108 @@
+// Package event defines the notification contract shared by collectors and senders.
+package event
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+type Kind string
+
+const (
+	TurnCompleted     Kind = "turn_completed"
+	ApprovalRequested Kind = "approval_requested"
+	InputRequested    Kind = "input_requested"
+)
+
+type Question struct {
+	Text    string   `json:"text"`
+	Options []string `json:"options,omitempty"`
+}
+
+// Event is versioned independently of Codex's input formats.
+type Event struct {
+	SchemaVersion int        `json:"schema_version"`
+	ID            string     `json:"id"`
+	Agent         string     `json:"agent"`
+	Kind          Kind       `json:"kind"`
+	Source        string     `json:"source"`
+	OccurredAt    time.Time  `json:"occurred_at"`
+	SessionID     string     `json:"session_id"`
+	TurnID        string     `json:"turn_id"`
+	RequestID     string     `json:"request_id,omitempty"`
+	Project       string     `json:"project"`
+	CWD           string     `json:"cwd,omitempty"`
+	Detail        string     `json:"detail,omitempty"`
+	Questions     []Question `json:"questions,omitempty"`
+}
+
+func ID(parts ...string) string {
+	hash := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(hash[:])
+}
+
+func Project(cwd string) string {
+	cwd = strings.TrimRight(strings.ReplaceAll(cwd, "\\", "/"), "/")
+	if index := strings.LastIndex(cwd, "/"); index >= 0 {
+		cwd = cwd[index+1:]
+	}
+	if cwd == "" {
+		return "Codex"
+	}
+	return cwd
+}
+
+func (e Event) Validate() error {
+	if e.SchemaVersion != 1 || e.Agent != "codex" || len(e.ID) != 64 || e.SessionID == "" || e.TurnID == "" || e.OccurredAt.IsZero() {
+		return fmt.Errorf("invalid notification identity")
+	}
+	if _, err := hex.DecodeString(e.ID); err != nil {
+		return fmt.Errorf("invalid notification ID")
+	}
+	switch e.Kind {
+	case TurnCompleted, ApprovalRequested, InputRequested:
+		return nil
+	default:
+		return fmt.Errorf("unsupported notification kind")
+	}
+}
+
+// LimitBytes never splits a UTF-8 code point, including when adding an ellipsis.
+func LimitBytes(s string, limit int) string {
+	s = strings.ToValidUTF8(s, "�")
+	if len(s) <= limit {
+		return s
+	}
+	if limit < 3 {
+		return ""
+	}
+	end := limit - 3
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end] + "…"
+}
+
+func (e Event) Title() string {
+	label := map[Kind]string{TurnCompleted: "本轮完成", ApprovalRequested: "审批申请", InputRequested: "需要输入"}[e.Kind]
+	return "Blip · " + label + " · " + LimitBytes(e.Project, 120)
+}
+
+func (e Event) Text() string {
+	var text strings.Builder
+	fmt.Fprintf(&text, "%s\n项目：%s\n会话：%s\n轮次：%s\n时间：%s", e.Title(), e.Project, e.SessionID, e.TurnID, e.OccurredAt.Format(time.RFC3339))
+	if e.Detail != "" {
+		text.WriteString("\n\n" + e.Detail)
+	}
+	for _, question := range e.Questions {
+		text.WriteString("\n\n" + question.Text)
+		for _, option := range question.Options {
+			text.WriteString("\n• " + option)
+		}
+	}
+	return text.String()
+}
