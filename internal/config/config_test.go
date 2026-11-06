@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,5 +52,53 @@ func TestLiteralDollarSignsInCredentialsArePreserved(t *testing.T) {
 	value := "literal$credential"
 	if err := expand(&value); err != nil || value != "literal$credential" {
 		t.Fatal("literal credential was expanded")
+	}
+}
+
+func TestDestinationRejectsUnsendableSettings(t *testing.T) {
+	for _, entry := range []struct {
+		name  string
+		apply func(*Destination)
+	}{
+		{"empty hostname", func(d *Destination) { d.URL = "http://:8080/?key=private-url" }},
+		{"zero port", func(d *Destination) { d.URL = "https://example.invalid:0/?key=private-url" }},
+		{"port out of range", func(d *Destination) { d.URL = "https://example.invalid:65536/?key=private-url" }},
+		{"webhook token space", func(d *Destination) { d.Token = "private token" }},
+		{"webhook token newline", func(d *Destination) { d.Token = "private-token\n" }},
+		{"gotify token control", func(d *Destination) { d.Kind, d.Token = "gotify", "private-token\x00" }},
+		{"gotify token delete", func(d *Destination) { d.Kind, d.Token = "gotify", "private-token\x7f" }},
+		{"header control", func(d *Destination) { d.Headers = map[string]string{"X-Key": "private-header\x00"} }},
+		{"header delete", func(d *Destination) { d.Headers = map[string]string{"X-Key": "private-header\x7f"} }},
+		{"duplicate header spelling", func(d *Destination) {
+			d.Headers = map[string]string{"X-Key": "private-header", "x-key": "another-private-header"}
+		}},
+		{"reserved event identity", func(d *Destination) { d.Headers = map[string]string{"x-blip-event-id": "private-header"} }},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			destination := Destination{ID: "test", Kind: "webhook", Enabled: true, URL: "https://example.invalid/?key=private-url"}
+			entry.apply(&destination)
+			data, err := json.Marshal(Config{SchemaVersion: 1, Destinations: []Destination{destination}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Read(path); err == nil || strings.Contains(err.Error(), "private") {
+				t.Fatalf("configuration must reject invalid settings without exposing credentials: %v", err)
+			}
+		})
+	}
+}
+
+func TestDestinationAllowsValidHeaderWhitespaceAndPortBoundaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"schema_version":1,"destinations":[{"id":"low","kind":"webhook","enabled":true,"url":"http://localhost:1/","headers":{"X-Label":"two words\tand a tab"}},{"id":"high","kind":"gotify","enabled":true,"url":"http://[::1]:65535/","token":"valid-token"}]}`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(path); err != nil {
+		t.Fatalf("valid settings rejected: %v", err)
 	}
 }

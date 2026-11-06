@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,5 +158,108 @@ func TestLaterDiscoveredHistoricalFilesDoNotFloodNotifications(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("old records discovered after initialization were pushed")
+	}
+}
+
+func TestBaselineOffsetDoesNotSwallowConcurrentAppend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	history := meta("s", "user")
+	if err := os.WriteFile(path, []byte(history), 0600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendFile(t, path, completion("after-snapshot", "task_complete"))
+	offset, err := baselineOffset(file, info.Size())
+	if err != nil || offset != int64(len(history)) {
+		t.Fatalf("baseline swallowed appended record: offset=%d err=%v", offset, err)
+	}
+}
+
+func TestInitialScanCapturesCompletionArrivingAfterBaseline(t *testing.T) {
+	dir := t.TempDir()
+	sessions := filepath.Join(dir, "sessions")
+	if err := os.MkdirAll(sessions, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Fix the initial-scan clock before creating the file, without timing sleeps.
+	c := Collector{SessionsDir: sessions, StatePath: filepath.Join(dir, "cursor.json"), loaded: true, state: checkpoint{BaselineAt: time.Now().Add(-time.Second), Files: map[string]*cursor{}}}
+	path := filepath.Join(sessions, "rollout-during-scan.jsonl")
+	if err := os.WriteFile(path, []byte(meta("s", "user")+completion("during-scan", "task_complete")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var notifications []event.Event
+	if err := c.Poll(context.Background(), func(e event.Event) error { notifications = append(notifications, e); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 || notifications[0].TurnID != "during-scan" {
+		t.Fatal("completion written during baseline scan was skipped")
+	}
+}
+
+func TestCollectorDetectsEqualAndLargerReplacementAfterRestart(t *testing.T) {
+	for _, replacement := range []struct{ name, extra string }{{"equal", ""}, {"larger", strings.Repeat(" ", 1000)}} {
+		t.Run(replacement.name, func(t *testing.T) {
+			dir := t.TempDir()
+			sessions := filepath.Join(dir, "sessions")
+			if err := os.MkdirAll(sessions, 0700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(sessions, "rollout-replaced.jsonl")
+			baseline := time.Now().Add(-time.Hour)
+			c := Collector{SessionsDir: sessions, StatePath: filepath.Join(dir, "cursor.json"), loaded: true, state: checkpoint{Initialized: true, BaselineAt: baseline, Files: map[string]*cursor{}}}
+			header := meta("session", "user")
+			old := completion("old", "task_complete")
+			if err := os.WriteFile(path, []byte(header+old), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var notifications []event.Event
+			emit := func(e event.Event) error { notifications = append(notifications, e); return nil }
+			if err := c.Poll(context.Background(), emit); err != nil {
+				t.Fatal(err)
+			}
+			// Same metadata and byte count defeat a size-only or header-only check.
+			newRecord := strings.Replace(old, `"old"`, `"new"`, -1)
+			if err := os.WriteFile(path, []byte(header+newRecord+replacement.extra), 0600); err != nil {
+				t.Fatal(err)
+			}
+			c = Collector{SessionsDir: sessions, StatePath: c.StatePath}
+			if err := c.Poll(context.Background(), emit); err != nil {
+				t.Fatal(err)
+			}
+			if len(notifications) != 2 || notifications[1].TurnID != "new" {
+				t.Fatalf("replacement was skipped: %+v", notifications)
+			}
+		})
+	}
+}
+
+func TestInvalidCheckpointCursorsAreRejectedWithoutPanic(t *testing.T) {
+	for _, position := range []*cursor{nil, {Offset: -1}, {HeaderHash: "not-a-sha256"}} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "checkpoint.json")
+		state := checkpoint{Initialized: true, BaselineAt: time.Now(), Files: map[string]*cursor{filepath.Join(dir, "rollout-a.jsonl"): position}}
+		if err := store.WriteJSON(path, state); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := Collector{SessionsDir: dir, StatePath: path}
+		if err := c.Poll(context.Background(), func(event.Event) error { t.Fatal("invalid checkpoint emitted a notification"); return nil }); !errors.Is(err, ErrCheckpoint) {
+			t.Fatalf("invalid checkpoint accepted: %v", err)
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || string(after) != string(before) {
+			t.Fatal("invalid checkpoint was overwritten")
+		}
 	}
 }

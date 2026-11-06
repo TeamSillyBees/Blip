@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -131,12 +132,26 @@ func read(path string, resolve bool) (Config, error) {
 			}
 		}
 		parsed, parseErr := url.Parse(d.URL)
-		if parseErr != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Fragment != "" {
+		if parseErr != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Fragment != "" {
 			return c, fmt.Errorf("destination %q requires an http(s) URL without userinfo or fragment", d.ID)
+		}
+		if port := parsed.Port(); port != "" {
+			number, err := strconv.Atoi(port)
+			if err != nil || number < 1 || number > 65535 {
+				return c, fmt.Errorf("destination %q has an invalid URL port", d.ID)
+			}
 		}
 		if d.Kind == "gotify" && d.Token == "" {
 			return c, fmt.Errorf("destination %q requires an application token", d.ID)
 		}
+		if d.Kind == "gotify" || d.Kind == "webhook" {
+			for _, char := range []byte(d.Token) {
+				if char <= ' ' || char == 127 {
+					return c, fmt.Errorf("destination %q token contains whitespace or control characters", d.ID)
+				}
+			}
+		}
+		headerNames := map[string]bool{}
 		for key, value := range d.Headers {
 			if d.Kind != "webhook" {
 				return c, fmt.Errorf("custom headers are only supported for webhook destinations")
@@ -147,6 +162,11 @@ func read(path string, resolve bool) (Config, error) {
 			if !validHeader(key, value) {
 				return c, fmt.Errorf("destination %q contains an invalid header", d.ID)
 			}
+			canonical := http.CanonicalHeaderKey(key)
+			if headerNames[canonical] {
+				return c, fmt.Errorf("destination %q contains duplicate header names", d.ID)
+			}
+			headerNames[canonical] = true
 			d.Headers[key] = value
 		}
 		if d.Token != "" && d.Kind == "webhook" && hasAuthorization(d.Headers) {
@@ -175,8 +195,13 @@ func expand(value *string) error {
 }
 
 func validHeader(key, value string) bool {
-	if key == "" || strings.ContainsAny(value, "\r\n") {
+	if key == "" {
 		return false
+	}
+	for _, char := range []byte(value) {
+		if char == 127 || (char < ' ' && char != '\t') {
+			return false
+		}
 	}
 	for _, char := range key {
 		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", char)) {
@@ -184,7 +209,7 @@ func validHeader(key, value string) bool {
 		}
 	}
 	canonical := http.CanonicalHeaderKey(key)
-	return canonical != "Host" && canonical != "Content-Length" && canonical != "Content-Type" && canonical != "Transfer-Encoding"
+	return canonical != "Host" && canonical != "Content-Length" && canonical != "Content-Type" && canonical != "Transfer-Encoding" && canonical != "X-Blip-Event-Id"
 }
 
 func hasAuthorization(headers map[string]string) bool {

@@ -47,6 +47,8 @@ func FeishuSignature(timestamp, secret string) string {
 }
 
 func (s *Sender) Send(ctx context.Context, destination config.Destination, notification event.Event) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	target := destination.URL
 	var payload any
 	switch destination.Kind {
@@ -113,7 +115,7 @@ func (s *Sender) Send(ctx context.Context, destination config.Destination, notif
 	if err != nil {
 		return &SendError{"notification transport failed or timed out", true}
 	}
-	defer response.Body.Close()
+	defer releaseResponse(response, cancel)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return &SendError{fmt.Sprintf("notification HTTP status %d", response.StatusCode), response.StatusCode == 408 || response.StatusCode == 425 || response.StatusCode == 429 || response.StatusCode >= 500}
 	}
@@ -151,4 +153,17 @@ func (s *Sender) Send(ctx context.Context, destination config.Destination, notif
 		return &SendError{fmt.Sprintf("bot rejected notification (code %d)", *code), true}
 	}
 	return nil
+}
+
+// Small response bodies are consumed so normal webhook replies and HTTP errors
+// can reuse their connection. Cleanup is bounded even if the peer stalls after
+// returning headers; response content never changes a webhook's 2xx success.
+func releaseResponse(response *http.Response, cancel context.CancelFunc) {
+	defer response.Body.Close()
+	if response.ContentLength < 0 || response.ContentLength > 64*1024 {
+		return
+	}
+	timer := time.AfterFunc(100*time.Millisecond, cancel)
+	defer timer.Stop()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024+1))
 }

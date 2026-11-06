@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -131,5 +132,71 @@ func TestFeishuCapsEncodedBodyWithEscapedContent(t *testing.T) {
 	notification.Detail = strings.Repeat("\x00", 16000)
 	if err := New(time.Second).Send(context.Background(), config.Destination{Kind: "feishu", URL: server.URL}, notification); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSmallWebhookResponsesReuseConnection(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusBadRequest} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			addresses := make(chan string, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				addresses <- r.RemoteAddr
+				w.WriteHeader(status)
+				io.WriteString(w, "small response body")
+			}))
+			defer server.Close()
+			transport := &http.Transport{}
+			defer transport.CloseIdleConnections()
+			sender := New(time.Second)
+			sender.Client.Transport = transport
+			for range 2 {
+				err := sender.Send(context.Background(), config.Destination{Kind: "webhook", URL: server.URL}, sample(event.TurnCompleted))
+				if status == http.StatusOK && err != nil || status == http.StatusBadRequest && (err == nil || Retryable(err)) {
+					t.Fatalf("unexpected HTTP result: %v", err)
+				}
+			}
+			if first, second := <-addresses, <-addresses; first != second {
+				t.Fatalf("small response body prevented connection reuse: %q then %q", first, second)
+			}
+		})
+	}
+}
+
+func TestResponseCleanupDoesNotWaitForStalledBodies(t *testing.T) {
+	for _, entry := range []struct {
+		name          string
+		contentLength string
+		status        int
+	}{
+		{"small success", "10", http.StatusOK},
+		{"unknown length success", "", http.StatusOK},
+		{"large success", "65537", http.StatusOK},
+		{"small retryable error", "10", http.StatusServiceUnavailable},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				if entry.contentLength != "" {
+					w.Header().Set("Content-Length", entry.contentLength)
+				}
+				w.WriteHeader(entry.status)
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			start := time.Now()
+			err := New(3*time.Second).Send(ctx, config.Destination{Kind: "webhook", URL: server.URL}, sample(event.TurnCompleted))
+			if elapsed := time.Since(start); elapsed > time.Second {
+				t.Fatalf("response cleanup waited for a stalled body for %v", elapsed)
+			}
+			if entry.status == http.StatusOK && err != nil || entry.status == http.StatusServiceUnavailable && (err == nil || !Retryable(err)) {
+				t.Fatalf("response cleanup changed HTTP result: %v", err)
+			}
+			if ctx.Err() != nil {
+				t.Fatal("response cleanup canceled the caller's context")
+			}
+		})
 	}
 }

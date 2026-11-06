@@ -3,6 +3,8 @@ package codex
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,9 +69,11 @@ type record struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 type cursor struct {
-	Offset   int64           `json:"offset"`
-	Metadata Metadata        `json:"metadata"`
-	Aborted  map[string]bool `json:"aborted,omitempty"`
+	Offset     int64           `json:"offset"`
+	Metadata   Metadata        `json:"metadata"`
+	Aborted    map[string]bool `json:"aborted,omitempty"`
+	HeaderHash string          `json:"header_hash,omitempty"`
+	AnchorHash string          `json:"anchor_hash,omitempty"`
 }
 type checkpoint struct {
 	Initialized bool               `json:"initialized"`
@@ -90,15 +94,21 @@ func readMetadata(path string) (Metadata, error) {
 		return metadata, err
 	}
 	defer file.Close()
-	data, _, err := boundedLine(bufio.NewReader(file))
+	metadata, _, err = readHeader(file)
+	return metadata, err
+}
+
+func readHeader(reader io.Reader) (Metadata, string, error) {
+	var metadata Metadata
+	data, _, err := boundedLine(bufio.NewReader(reader))
 	if err != nil {
-		return metadata, err
+		return metadata, "", err
 	}
 	var line record
 	if json.Unmarshal(data, &line) != nil || line.Type != "session_meta" || json.Unmarshal(line.Payload, &metadata) != nil {
-		return metadata, fmt.Errorf("unrecognized Codex session metadata")
+		return metadata, "", fmt.Errorf("unrecognized Codex session metadata")
 	}
-	return metadata, nil
+	return metadata, hashBytes(data), nil
 }
 
 // boundedLine consumes complete oversized records without allocating their full contents.
@@ -123,20 +133,14 @@ func boundedLine(reader *bufio.Reader) ([]byte, int64, error) {
 	}
 }
 
-func baselineOffset(path string, size int64) (int64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
+func baselineOffset(file io.ReaderAt, size int64) (int64, error) {
 	start := size - 64*1024
 	if start < 0 {
 		start = 0
 	}
-	if _, err = file.Seek(start, io.SeekStart); err != nil {
-		return 0, err
-	}
-	data, err := io.ReadAll(file)
+	// Bound the baseline to the observed size. A concurrently appended completion
+	// belongs to the next read and must not be swallowed by a read through EOF.
+	data, err := io.ReadAll(io.NewSectionReader(file, start, size-start))
 	if err != nil {
 		return 0, err
 	}
@@ -148,13 +152,56 @@ func baselineOffset(path string, size int64) (int64, error) {
 	return 0, nil
 }
 
+func hashBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func anchorHash(file io.ReaderAt, offset int64) (string, error) {
+	if offset == 0 {
+		return "", nil
+	}
+	start := offset - 512
+	if start < 0 {
+		start = 0
+	}
+	data := make([]byte, offset-start)
+	if _, err := file.ReadAt(data, start); err != nil {
+		return "", err
+	}
+	return hashBytes(data), nil
+}
+
+func validCheckpoint(state checkpoint) bool {
+	if !state.Initialized || state.Files == nil || state.BaselineAt.IsZero() {
+		return false
+	}
+	for path, position := range state.Files {
+		if path == "" || position == nil || position.Offset < 0 {
+			return false
+		}
+		for _, fingerprint := range []string{position.HeaderHash, position.AnchorHash} {
+			if fingerprint == "" {
+				continue
+			} // Existing v0.1 checkpoints acquire fingerprints on their next read.
+			if len(fingerprint) != sha256.Size*2 {
+				return false
+			}
+			if _, err := hex.DecodeString(fingerprint); err != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (c *Collector) Poll(ctx context.Context, emit func(event.Event) error) error {
 	if !c.loaded {
 		err := store.ReadJSON(c.StatePath, &c.state)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return ErrCheckpoint
 		}
-		if err == nil && (!c.state.Initialized || c.state.Files == nil || c.state.BaselineAt.IsZero()) {
+		if err == nil && !validCheckpoint(c.state) {
 			return ErrCheckpoint
 		}
 		if errors.Is(err, os.ErrNotExist) {
@@ -181,40 +228,7 @@ func (c *Collector) Poll(ctx context.Context, emit func(event.Event) error) erro
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "rollout-") || !strings.HasSuffix(entry.Name(), ".jsonl") {
 			return nil
 		}
-		info, err := entry.Info()
-		if err != nil {
-			failures = append(failures, fmt.Errorf("cannot inspect a Codex session file"))
-			return nil
-		}
-		position, exists := c.state.Files[path]
-		if !exists {
-			metadata, metaErr := readMetadata(path)
-			if metaErr != nil {
-				return nil
-			} // A new file may still be writing its first line.
-			position = &cursor{Metadata: metadata, Aborted: map[string]bool{}}
-			if initial {
-				position.Offset, err = baselineOffset(path, info.Size())
-				if err != nil {
-					return err
-				}
-			}
-			c.state.Files[path] = position
-		}
-		if !position.Metadata.IsRoot() {
-			return nil
-		}
-		if info.Size() < position.Offset {
-			position.Offset = 0
-			position.Aborted = map[string]bool{}
-			if metadata, metaErr := readMetadata(path); metaErr == nil {
-				position.Metadata = metadata
-			}
-		}
-		if position.Offset == info.Size() {
-			return nil
-		}
-		if err = c.read(ctx, path, position, emit); err != nil {
+		if err := c.scanFile(ctx, path, initial, emit); err != nil {
 			failures = append(failures, err)
 		}
 		return nil
@@ -234,12 +248,63 @@ func (c *Collector) Poll(ctx context.Context, emit func(event.Event) error) erro
 	return errors.Join(failures...)
 }
 
-func (c *Collector) read(ctx context.Context, path string, position *cursor, emit func(event.Event) error) error {
+func (c *Collector) scanFile(ctx context.Context, path string, initial bool, emit func(event.Event) error) error {
 	file, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		return fmt.Errorf("cannot open Codex session file")
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("cannot inspect Codex session file")
+	}
+	metadata, header, err := readHeader(file)
+	if err != nil {
+		return nil
+	} // A new or replaced file may still be writing its first line.
+	position, exists := c.state.Files[path]
+	reset := false
+	if exists {
+		reset = info.Size() < position.Offset || metadata.ID != position.Metadata.ID || metadata.SessionID != position.Metadata.SessionID || (position.HeaderHash != "" && header != position.HeaderHash)
+		if !reset && position.AnchorHash != "" {
+			anchor, err := anchorHash(file, position.Offset)
+			if err != nil {
+				return fmt.Errorf("cannot validate Codex session read position")
+			}
+			reset = anchor != position.AnchorHash
+		}
+	}
+	if !exists || reset {
+		position = &cursor{Metadata: metadata, Aborted: map[string]bool{}}
+		// Files changed while the initial scan is underway may already contain
+		// post-baseline events. Read them with the timestamp filter instead of
+		// jumping past them; older, unchanged files can take the fast EOF path.
+		if !exists && initial && info.ModTime().Before(c.state.BaselineAt) {
+			position.Offset, err = baselineOffset(file, info.Size())
+			if err != nil {
+				return err
+			}
+		}
+		c.state.Files[path] = position
+	}
+	position.Metadata, position.HeaderHash = metadata, header
+	if !metadata.IsRoot() {
+		return nil
+	}
+	readErr := c.read(ctx, file, position, emit)
+	anchor, err := anchorHash(file, position.Offset)
+	if err != nil {
+		return errors.Join(readErr, fmt.Errorf("cannot save Codex session read position"))
+	}
+	position.AnchorHash = anchor
+	return readErr
+}
+
+func (c *Collector) read(ctx context.Context, file *os.File, position *cursor, emit func(event.Event) error) error {
+	var err error
 	if _, err = file.Seek(position.Offset, io.SeekStart); err != nil {
 		return err
 	}
@@ -267,7 +332,7 @@ func (c *Collector) read(ctx context.Context, path string, position *cursor, emi
 				}
 			}
 			notification := completeEvent(line, position)
-			if notification != nil && !notification.OccurredAt.Before(c.state.BaselineAt) {
+			if notification != nil && notification.OccurredAt.After(c.state.BaselineAt) {
 				if err = emit(*notification); err != nil {
 					return err
 				}

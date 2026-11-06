@@ -167,6 +167,20 @@ func TestCLIEndToEnd(t *testing.T) {
 	if bytes.Contains(logData, []byte("local-test-only")) {
 		t.Fatal("credential leaked to logs")
 	}
+	// Invalid recovery state must fail startup promptly, not leave a false success
+	// or make the caller wait out a fixed readiness timeout after the process died.
+	if err := os.WriteFile(filepath.Join(dir, "state", "rollout-cursors.json"), []byte(`{"initialized":true,"files":null}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Now()
+	command := exec.Command(binary, "--config", path, "start")
+	output, err := command.CombinedOutput()
+	if err == nil || !bytes.Contains(output, []byte("exited during startup")) {
+		t.Fatalf("invalid checkpoint startup result: %s %v", output, err)
+	}
+	if time.Since(startedAt) > 4*time.Second {
+		t.Fatal("startup failure was hidden until readiness timeout")
+	}
 }
 
 func waitFor(t *testing.T, condition func() bool) {

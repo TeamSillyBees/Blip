@@ -26,4 +26,6 @@ Blip 使用 HTTP POST，`Content-Type: application/json`，任何 HTTP 2xx 表�
 
 每次重试携带相同的 `id` 和 `X-Blip-Event-Id` 请求头。接收端应先持久接收，再返回 2xx，并按事件标识去重。Blip 的本地去重与外部接收不是一个事务，存在重复投递窗口。
 
+自定义请求头不能覆盖 `Host`、`Content-Length`、`Content-Type`、`Transfer-Encoding` 或 `X-Blip-Event-Id`，也不能同时配置仅大小写不同的重复名称。头值中的非法控制字符和 token 中的空白字符会在后台启动时被拒绝。
+
 不会把渠道配置或完整会话载荷放入这个协议。请求详情可能包含用户问题、回复摘要或待授权命令，内容范围以首版需求为准。

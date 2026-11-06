@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -144,27 +143,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		fmt.Fprintln(output, "Stop requested; the worker is finishing its current operation.")
 		return nil
 	case "status":
-		running, err := isRunning(c)
-		if err != nil {
-			return err
-		}
-		jobs, err := (store.Queue{Dir: c.StateDir}).Load()
-		if err != nil {
-			return err
-		}
-		pending, delivered, failed := 0, 0, 0
-		for _, job := range jobs {
-			for _, receipt := range job.Deliveries {
-				if receipt.DeliveredAt != nil {
-					delivered++
-				} else if receipt.Failed {
-					failed++
-				} else {
-					pending++
-				}
-			}
-		}
-		return json.NewEncoder(output).Encode(map[string]any{"running": running, "pending": pending, "delivered": delivered, "failed": failed, "state_dir": c.StateDir})
+		return printStatus(c, output)
 	case "test":
 		now := time.Now().UTC()
 		notification := event.Event{SchemaVersion: 1, ID: event.ID("test", now.Format(time.RFC3339Nano)), Agent: "codex", Kind: event.TurnCompleted, Source: "blip/test", OccurredAt: now, SessionID: "blip-test", TurnID: now.Format("20060102T150405.000000000"), Project: "Blip", Detail: "这是一条 Blip 测试通知。"}
@@ -202,7 +181,12 @@ func start(c config.Config, output io.Writer) error {
 		return err
 	}
 	if running {
-		fmt.Fprintln(output, "Blip is already running.")
+		var status worker.Status
+		if store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &status) == nil && status.Ready {
+			fmt.Fprintln(output, "Blip is already running.")
+		} else {
+			fmt.Fprintln(output, "Blip is initializing. Inspect blip status for readiness.")
+		}
 		return nil
 	}
 	executable, err := os.Executable()
@@ -221,7 +205,8 @@ func start(c config.Config, output io.Writer) error {
 		return fmt.Errorf("start worker: %w", err)
 	}
 	childPID := child.Process.Pid
-	_ = child.Process.Release()
+	exited := make(chan error, 1)
+	go func() { exited <- child.Wait() }()
 	for i := 0; i < 50; i++ {
 		running, err = isRunning(c)
 		if err != nil {
@@ -232,9 +217,19 @@ func start(c config.Config, output io.Writer) error {
 			fmt.Fprintln(output, "Blip started.")
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-exited:
+			// A simultaneous start may have won the worker lock.
+			active, _ := isRunning(c)
+			if active && store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &status) == nil && status.Ready {
+				fmt.Fprintln(output, "Blip is already running.")
+				return nil
+			}
+			return fmt.Errorf("worker exited during startup; inspect worker.log in the state directory")
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-	return fmt.Errorf("worker did not start; inspect worker.log in the state directory")
+	return fmt.Errorf("worker has not reported ready yet; inspect blip status and worker.log before starting again")
 }
 
 func help(output io.Writer) {

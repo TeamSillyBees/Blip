@@ -51,6 +51,7 @@ func (d Dispatcher) DeliverOnce(ctx context.Context, destination config.Destinat
 			writeCtx, writeCancel := context.WithTimeout(ctx, 3*time.Second)
 			err = d.Queue.UpdateDelivery(writeCtx, job.Event.ID, destination.ID, func(current *store.Delivery) {
 				current.Attempts++
+				current.LastAttemptAt = &finishedAt
 				if sendErr == nil {
 					current.DeliveredAt = &finishedAt
 					current.LastError = ""
@@ -82,10 +83,11 @@ func Backoff(attempt int) time.Duration {
 }
 
 type Status struct {
-	Ready     bool      `json:"ready"`
-	PID       int       `json:"pid"`
-	StartedAt time.Time `json:"started_at"`
-	Heartbeat time.Time `json:"heartbeat"`
+	Ready          bool      `json:"ready"`
+	PID            int       `json:"pid"`
+	StartedAt      time.Time `json:"started_at"`
+	Heartbeat      time.Time `json:"heartbeat"`
+	CollectorError string    `json:"collector_error,omitempty"`
 }
 
 func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
@@ -104,6 +106,9 @@ func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	stopDone := make(chan struct{})
+	go func() { defer close(stopDone); watchStop(ctx, stopPath, cancel, logger) }()
+	defer func() { cancel(); <-stopDone }()
 	status := Status{PID: os.Getpid(), StartedAt: time.Now().UTC(), Heartbeat: time.Now().UTC()}
 	if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
 		return err
@@ -141,12 +146,18 @@ func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
 	ticker := time.NewTicker(c.PollDuration())
 	defer ticker.Stop()
 	lastPrune := time.Time{}
+	lastQuarantined := 0
 	for {
+		status.CollectorError = ""
 		if err = collector.Poll(ctx, func(e event.Event) error { _, err := queue.Enqueue(ctx, e, destinations); return err }); err != nil && ctx.Err() == nil {
 			if errors.Is(err, codex.ErrCheckpoint) {
 				return err
 			}
 			logger.Printf("collector: %v", err)
+			status.CollectorError = err.Error()
+		}
+		if ctx.Err() != nil {
+			return nil
 		}
 		status.Heartbeat = time.Now().UTC()
 		status.Ready = true
@@ -159,6 +170,14 @@ func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
 			}
 			lastPrune = time.Now()
 		}
+		if count, countErr := queue.QuarantineCount(); countErr != nil {
+			logger.Printf("queue quarantine status: %v", countErr)
+		} else {
+			if count > lastQuarantined {
+				logger.Printf("queue has %d quarantined records; inspect the quarantine directory before recovering them", count)
+			}
+			lastQuarantined = count
+		}
 		if _, err = os.Stat(stopPath); err == nil {
 			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -168,6 +187,29 @@ func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+		}
+	}
+}
+
+// Stop must remain responsive while the collector sleeps or a sender awaits HTTP.
+func watchStop(ctx context.Context, path string, cancel context.CancelFunc, logger *log.Logger) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, err := os.Stat(path)
+			if err == nil {
+				cancel()
+				return
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				logger.Printf("cannot check stop request: %v", err)
+				cancel()
+				return
+			}
 		}
 	}
 }
