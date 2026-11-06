@@ -17,6 +17,12 @@ func WriteJSON(path string, value any) error {
 }
 
 func WriteFile(path string, data []byte) error {
+	return WriteFileMode(path, data, 0600)
+}
+
+// WriteFileMode preserves an existing external settings file's Unix mode while
+// publishing atomically. Internal state continues to use private mode 0600.
+func WriteFileMode(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
@@ -26,7 +32,7 @@ func WriteFile(path string, data []byte) error {
 	}
 	name := file.Name()
 	defer os.Remove(name)
-	if err = file.Chmod(0600); err == nil {
+	if err = file.Chmod(mode.Perm()); err == nil {
 		_, err = file.Write(data)
 	}
 	if err == nil {

@@ -1,6 +1,6 @@
 # Blip
 
-把 Codex 需要你关注的消息，发送到飞书、企业微信、Gotify 或自定义 webhook。
+在 agent 本轮结束或需要你响应时，发送提醒到飞书、企业微信、Gotify 或自定义 webhook。
 
 首版面向 **Windows 上的 Codex CLI 与桌面版**，提供三类提醒：
 
@@ -101,7 +101,7 @@ version             显示版本
 
 ## 多来源配置
 
-当前源码已支持多个独立 Codex home，并建立内置 harness 适配层。旧配置无需修改；需要新增来源时使用：
+当前源码已支持多个独立 Codex home 和 [Claude Code](docs/claude-code.md)，使用内置 harness 适配层。旧配置无需修改；需要新增来源时使用：
 
 ```powershell
 blip sources add --source codex-work --harness codex --home 'D:\Agent Homes\codex-work'

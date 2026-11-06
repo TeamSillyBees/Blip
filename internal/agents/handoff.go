@@ -259,11 +259,15 @@ func (h handoffs) resume(ctx context.Context, session, turnKey, nativeTurn, iden
 }
 
 func (h handoffs) resolveApproval(ctx context.Context, session, turnKey, nativeTurn, requestID string) error {
+	return h.resolveRequest(ctx, session, turnKey, nativeTurn, requestID, false)
+}
+
+func (h handoffs) resolveRequest(ctx context.Context, session, turnKey, nativeTurn, requestID string, includeInput bool) error {
 	if requestID == "" {
 		return nil
 	}
 	return h.mutate(ctx, session, turnKey, nativeTurn, func(state *handoffState) error {
-		if state.RequestKind == event.ApprovalRequested && state.RequestID == requestID {
+		if (state.RequestKind == event.ApprovalRequested || (includeInput && state.RequestKind == event.InputRequested)) && state.RequestID == requestID {
 			state.RequestKind = ""
 			state.RequestID = ""
 		}
@@ -308,7 +312,8 @@ func (h handoffs) flush(ctx context.Context, now time.Time, emit func(event.Even
 				current.Candidate = nil
 				return nil
 			}
-			e := event.Event{SchemaVersion: 2, ID: h.id(current), Agent: h.source.Harness, SourceID: h.source.ID, Kind: event.AttentionRequired, Reason: "stop_signal", Source: h.source.Harness + "/hooks", OccurredAt: candidate.OccurredAt, SessionID: current.SessionID, TurnID: current.NativeTurnID, Project: event.Project(candidate.CWD), CWD: candidate.CWD, Detail: "收到停止信号，请回到原会话查看。"}
+			e := event.Event{SchemaVersion: 2, ID: h.id(current), Agent: h.source.Harness, SourceID: h.source.ID, Kind: event.AttentionRequired, Reason: "stop_signal", Source: h.source.Harness + "/hooks", OccurredAt: candidate.OccurredAt, SessionID: current.SessionID, TurnID: current.NativeTurnID, CWD: candidate.CWD, Detail: "收到停止信号，请回到原会话查看。"}
+			e.Project = harnessProject(candidate.CWD, e.AgentName())
 			if err := emit(e); err != nil {
 				return err
 			}

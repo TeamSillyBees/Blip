@@ -102,6 +102,13 @@ CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失
 - 回归覆盖候选期限、取消、子 agent、请求去重、继续执行、迟到日志、并发最终信号、入队后关联状态保存前中断，以及新旧状态文件同时存在时的恢复。状态损坏暂停来源并保留原文件。
 - 默认 Codex 第一段接手沿用旧完成 ID；旧 v1 已入队完成的快照会阻止升级后的停止候选改变其结果。没有执行真实 Codex 会话或真实通知渠道验收；本地时延 P95 目标尚未作为全链路承诺。
 
+## Claude Code（2026-11-06，未发布）
+
+- 新增独立安装器与解析器。安装到指定 home 的 settings.json，使用真实程序 + args，不生成 shell wrapper；保留其他 hooks、权限与信任设置，用户修改过的已登记条目报告冲突。
+- 官方 CLI 2.1.318 Windows x64 在临时 home、本机模型服务下实际触发 UserPromptSubmit 与 Stop；安装命令在中文、空格、`$`、`&`、单引号路径上运行，worker 可恢复并通知持久候选。[样本与重跑方式](../internal/agents/testdata/claude-code/README.md)。
+- Stop 按 signal-only 提醒；StopFailure、AskUserQuestion、Elicitation、PermissionRequest 采用官方协议样本验证，尚未将这些交互分支标为客户端实测。没有调用真实模型或外部通知渠道。
+- 身份优先使用 prompt_id 与原生 request ID；旧 payload 的持久序号和内容合并是尽力去重。未读取 transcript，不新增 Windows 服务读取 Claude home 的权限。使用方法与局限见 [Claude Code 来源](claude-code.md)。
+
 ## 一手资料
 
 - [Codex Hooks](https://learn.chatgpt.com/docs/hooks)：事件、信任机制、工具覆盖、默认启用与 commandWindows。

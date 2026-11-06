@@ -54,7 +54,7 @@ type FileReader interface{ ReadPaths() []ReadPath }
 type Factory func(config.Config, config.Source) Adapter
 type Registry map[string]Factory
 
-func Builtins() Registry { return Registry{"codex": newCodex} }
+func Builtins() Registry { return Registry{"codex": newCodex, "claude-code": newClaude} }
 
 func (r Registry) Open(c config.Config, source config.Source) (Adapter, error) {
 	create := r[source.Harness]
