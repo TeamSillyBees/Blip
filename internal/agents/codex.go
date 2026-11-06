@@ -131,6 +131,9 @@ func (a *codexAdapter) Poll(ctx context.Context, emit func(event.Event) error) e
 		e.ReceivedAt, e.SignalAt = time.Now().UTC(), e.OccurredAt
 		e = a.normalize(e)
 		if a.source.EventVersion == 2 {
+			if e.Kind == event.InputRequested {
+				return a.ledger.request(ctx, e, e.TurnID, emit)
+			}
 			return a.ledger.finish(ctx, e, e.TurnID, emit)
 		}
 		return emit(e)
@@ -213,7 +216,7 @@ func (a *codexAdapter) ReadPaths() []ReadPath {
 func (a *codexAdapter) Capabilities() []Capability {
 	capabilities := []Capability{
 		{Event: "turn_completed", Support: "derived", Evidence: "Codex rollout task_complete with root session and cancellation checks", Validation: "fixtures; see docs/compatibility.md"},
-		{Event: "input_requested", Support: "native", Evidence: "PreToolUse request_user_input(_async)", Validation: "fixtures; see docs/compatibility.md"},
+		{Event: "input_requested", Support: "derived", Evidence: "PreToolUse plus rollout request_user_input(_async), deduplicated by native call ID", Validation: "desktop rollout fixture; see docs/compatibility.md"},
 		{Event: "approval_requested", Support: "native", Evidence: "PermissionRequest", Validation: "fixtures; delivery may follow approval"},
 		{Event: "attention_required", Support: "unavailable", Evidence: "stop/error correlation not enabled", Validation: "not yet implemented"},
 	}

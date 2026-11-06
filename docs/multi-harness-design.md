@@ -241,7 +241,7 @@ Windows 服务安装保存来源解析后的绝对位置，不使用 LocalServic
 
 | Harness | 接入路线 | 验收重点 |
 | --- | --- | --- |
-| Codex | 保留请求 hooks＋rollout 正常结束核验，v2 评估停止和自动异常信号 | 默认来源可升级 v2；原 ID 保持，迟到完成不重复提醒；手动取消与自动异常分开处理 |
+| Codex | 请求 hooks＋rollout 结构化提问补收和正常结束核验，v2 处理停止和自动异常信号 | 默认来源可升级 v2；双路请求按原生 call ID 去重，原 ID 保持，迟到完成不重复提醒；手动取消与自动异常分开处理 |
 | Claude Code | 原生程序接收 command hooks，独立安装与解析 | 对可被延续的 Stop 做有界合并；明确结束立即提醒，不明结果使用中性文案；区分审批、输入与闲置 Notification |
 | Hermes Agent | 优先评估目标版本 shell hooks，必要时使用薄 Python 插件 | 明确 shell envelope 与插件 kwargs 差异；保留 profile、session、turn 和结束结果；共享 gateway 正确关联会话 |
 | DeepSeek Harness / DSH | 已评估官方 bridge，因身份与结果缺口改用薄原生插件 | 观察原生 turn/end 与实际问题 waterfall，保留原生轮次及根会话身份；受控原版运行时测试通过，完整桌面会话待验 |

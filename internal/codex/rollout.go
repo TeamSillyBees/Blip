@@ -74,6 +74,7 @@ type cursor struct {
 	Aborted    map[string]bool `json:"aborted,omitempty"`
 	HeaderHash string          `json:"header_hash,omitempty"`
 	AnchorHash string          `json:"anchor_hash,omitempty"`
+	InputTurn  *inputTurn      `json:"input_turn,omitempty"`
 }
 type checkpoint struct {
 	Initialized bool               `json:"initialized"`
@@ -388,9 +389,21 @@ func (c *Collector) read(ctx context.Context, file *os.File, position *cursor, e
 					position.Metadata = metadata
 				}
 			}
+			observeInputTurn(line, position)
 			if c.Observe != nil && line.Timestamp.After(c.state.BaselineAt) {
 				if signal := lifecycle(line, position); signal != nil {
 					if err = c.Observe(ctx, *signal); err != nil {
+						return err
+					}
+				}
+			}
+			if line.Timestamp.After(c.state.BaselineAt) {
+				input, inputErr := rolloutInput(ctx, file, line, position)
+				if inputErr != nil {
+					return inputErr
+				}
+				if input != nil {
+					if err = emit(*input); err != nil {
 						return err
 					}
 				}

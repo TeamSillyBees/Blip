@@ -12,6 +12,7 @@
 | `Stop` | Codex 准备停止，但其他 hook 仍可要求继续 | 不用作完成事实 |
 | `notify` | 官方 `agent-turn-complete`，没有结果状态 | 不改写既有 notify 配置 |
 | rollout `task_complete` | 当前已观察格式中的轮次结束记录 | 核对根会话、turn_id、root_turn_id 与已知异常状态，再入队 |
+| rollout `response_item/function_call` | 已识别的 `request_user_input(_async)` 调用及问题参数 | 用最近原生 turn context 关联轮次；与 hook 共用 call ID 去重，补收缺失回调 |
 
 根会话需有 `thread_source: user`，或已识别的 CLI / VS Code / App Server 来源；明确子 agent 来源、父子会话标识冲突与未知来源不发完成提醒。历史文件按其真实目录递归查找，不按“今天”或“最近文件”猜会话，也不以正文问号、安静时间判断提问或完成。
 
@@ -23,6 +24,13 @@
 - 2026-10-25 只读检查的本机 CLI 为 `0.163.0`，hooks 为 stable 且已启用；未安装 Blip 的真实 hook 来重新触发审批测试。
 
 CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失败结束仍需分别补实机验证。Blip 仅处理已知事件结构；未知格式不会猜测为完成。Codex 升级后应重新验证兼容性。
+
+## 桌面版输入补收（2026-11-07，未发布）
+
+- Windows 桌面内核 `0.167.0-alpha.3.2` 的 `hooks/list` 确认 Blip 输入 hook 已启用且已信任，但连续两次真实选择题均未进入 Blip。提问记录仍完整写入 rollout；不能用“完成通知正常”推断请求 hook 正常，也不能把早期版本的实测结论外推到当前版本。
+- 新增结构化提问补收，适用于事件 v1/v2；只解析已识别的工具调用、原生 call ID 和非空问题。原生轮次来自 turn context / start 记录，不能关联时不猜测。首扫不推历史问题；旧游标按需回看原生上下文，不回退读取位置。
+- Hook 与日志使用同一请求 ID 和通知 ID，首次快照保留，重启或双路到达不重复入队。异步工具的 `accepted` 返回不代表用户已答复；v2 的具体问题仍覆盖对应停止提醒。
+- 脱敏真实样本与回归见 [Codex 桌面提问样本](../internal/codex/testdata/README.md)。同步提问仍是协议测试；没有为未知审批形状添加推断。
 
 ## 本地验收（2026-10-25）
 

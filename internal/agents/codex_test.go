@@ -8,9 +8,68 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/event"
 	"github.com/TeamSillyBees/Blip/internal/store"
 )
+
+func TestCodexRolloutInputDeduplicatesHooksAndCoversStop(t *testing.T) {
+	for _, eventVersion := range []int{1, 2} {
+		for _, hookFirst := range []bool{true, false} {
+			c := sourceConfig(t)
+			c.Sources[0].EventVersion = eventVersion
+			if eventVersion == 1 {
+				c.Sources[0].ID = config.DefaultSourceID
+			}
+			a := newCodex(c, c.Sources[0]).(*codexAdapter)
+			ctx := context.Background()
+			q := store.Queue{Dir: c.StateDir}
+			emit := func(e event.Event) error { _, err := q.Enqueue(ctx, e, []string{"one"}); return err }
+			if err := a.Poll(ctx, emit); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC()
+			hook := []byte(`{"hook_event_name":"PreToolUse","session_id":"root","turn_id":"native-turn","tool_name":"request_user_input_async","tool_use_id":"same-call","tool_input":{"questions":[{"title":"选哪一个？","options":["A","B"]}]}}`)
+			if hookFirst {
+				if err := a.ConsumeHook(ctx, hook, now, emit); err != nil {
+					t.Fatal(err)
+				}
+			}
+			lines := `{"type":"session_meta","payload":{"id":"root","source":"vscode","thread_source":"user"}}` + "\n"
+			for _, value := range []map[string]any{
+				{"type": "turn_context", "payload": map[string]any{"turn_id": "native-turn"}},
+				{"type": "response_item", "payload": map[string]any{"type": "function_call", "name": "request_user_input_async", "call_id": "same-call", "arguments": `{"questions":[{"title":"选哪一个？","options":["A","B"]}]}`}},
+				{"type": "response_item", "payload": map[string]any{"type": "function_call_output", "call_id": "same-call", "output": `{"accepted":true}`}},
+			} {
+				value["timestamp"] = now
+				data, _ := json.Marshal(value)
+				lines += string(data) + "\n"
+			}
+			if err := store.WriteFile(filepath.Join(c.Sources[0].Home, "sessions", "rollout-input.jsonl"), []byte(lines)); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.Poll(ctx, emit); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.ConsumeHook(ctx, hook, now, emit); err != nil {
+				t.Fatal(err)
+			}
+			if eventVersion == 2 {
+				stop := []byte(`{"hook_event_name":"Stop","session_id":"root","turn_id":"native-turn"}`)
+				if err := a.ConsumeHook(ctx, stop, now.Add(time.Second), emit); err != nil {
+					t.Fatal(err)
+				}
+				if err := a.ledger.flush(ctx, now.Add(3*time.Second), emit); err != nil {
+					t.Fatal(err)
+				}
+			}
+			jobs, err := q.Load()
+			if err != nil || len(jobs) != 1 || jobs[0].Event.Kind != event.InputRequested || jobs[0].Event.SchemaVersion != eventVersion {
+				t.Fatalf("input duplicated or classified as a finish (v%d, hook first %t): %+v %v", eventVersion, hookFirst, jobs, err)
+			}
+		}
+	}
+}
 
 func TestCodexV2HookLifecycleAndInstallation(t *testing.T) {
 	c := sourceConfig(t)
