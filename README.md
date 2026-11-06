@@ -2,17 +2,18 @@
 
 在 agent 本轮结束或需要你响应时，发送提醒到飞书、企业微信、Gotify 或自定义 webhook。
 
-首版面向 **Windows 上的 Codex CLI 与桌面版**，提供三类提醒：
+当前开发版接入 **Codex CLI 与桌面版、Claude Code、Hermes 和 DSH**。用户侧关注两个时机：
 
 | 提醒 | 触发依据 |
 | --- | --- |
-| 本轮完成 | 根会话中带会话、轮次标识的正常 `task_complete` 记录 |
-| 审批申请 | 官方 `PermissionRequest` hook 实际触发 |
-| 需要输入 | `request_user_input` / `request_user_input_async` 的 `PreToolUse` |
+| 本轮结束 | 查看结果，继续当前工作或安排下一个任务 |
+| 需要响应 | 回答问题、确认操作，或查看停止和异常原因 |
 
-“本轮完成”表示一次回复正常结束。审批覆盖取决于 Codex 的实际 hook 路径，完整边界见[兼容性与验证](docs/compatibility.md)。普通正文问句、其他 coding agent、远程审批和通知模板编辑器不在首版范围。
+本轮结束不表示业务任务已验收成功；已停止但结果未知时使用“请查看”的中性提醒。已知的用户取消、子任务和工具间隙不触发根会话接手提醒。各 harness 的覆盖和验证范围见[兼容性与验证](docs/compatibility.md)。WorkBuddy 等待桌面版验证，暂未接入。
 
 Hook 安装按 Codex `0.163.0` 的配置协议实现；更早版本需要另行验证，桌面版与 CLI 的实机证据分别记录在兼容性说明中。
+
+Codex 结构化提问同时通过 hook 与会话日志采集，按原生调用 ID 去重，以覆盖桌面版未执行请求回调的情况。首次启动不补发历史问题；普通正文问句不单独识别。升级时须同时更新 hook 程序和 Windows 服务副本，具体证据见[兼容性记录](docs/compatibility.md)。
 
 ## 开始使用
 
@@ -28,7 +29,7 @@ blip start
 blip test
 ```
 
-当前源码版本为 `0.2.0-dev.4`，尚未发布；公共 npm 仍为 `0.2.0-dev.0`。下面的精简通知、设备名称、配置向导和 Windows 服务可先通过源码构建使用。
+当前源码版本为 `0.2.0-dev.5`，尚未发布；公共 npm 仍为 `0.2.0-dev.0`。多来源接入、Codex 桌面提问补收、通知配置向导和 Windows 服务可先通过源码或本地安装包使用。
 
 直接运行单文件时，使用下面的构建方式；构建需要 Go 1.25.8 或更新版本，运行生成的程序不需要安装 Go 或 Node.js。
 
@@ -170,4 +171,4 @@ npm test
 
 项目约定见[首版需求](docs/requirements.md)、[术语表](GLOSSARY.md)和[架构决策](docs/adr/)。本项目参考 [hellolib/agent-notify](https://github.com/hellolib/agent-notify/tree/ed2842189eff44009a7bbe946b8a1b29bbc983d4) 的适配器、统一消息与渠道发送器分工，代码独立实现。依赖许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-后续扩展见[多 harness 事件接入设计](docs/multi-harness-design.md)，涵盖适配器、来源身份、兼容迁移和分阶段验收；公共来源基础已落地，其他 harness 与停止信号关联按文档分批实施。
+设计与验收路线见[多 harness 事件接入设计](docs/multi-harness-design.md)。公共来源、持久接手关联、四种 harness 及本地延迟统计已实现；Windows 服务到 Gotify 的真实桌面提问链路已实测。其他渠道与部分 harness 交互路径的验证范围见兼容性记录。

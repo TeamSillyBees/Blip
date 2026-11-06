@@ -5,3 +5,5 @@
 本次实测中，`hooks/list` 报告 Blip 的 PreToolUse hook 已启用且已信任，但连续两次桌面提问均未进入 Blip。该样本证明提问结构可从 rollout 补收；不据此断言所有客户端版本都跳过此 hook。同步 `request_user_input` 使用协议回归样本验证。
 
 `TestDesktopInputRolloutFixture` 验证原生轮次关联、问题与选项提取。其他测试覆盖旧游标升级、首次基线、跨记录块恢复、取消、子任务、hook/rollout 双路去重和异步返回不消除输入请求。
+
+同日更新真实 LocalService 服务后，另一条桌面选择题经 rollout 补收发送到已配置的 Gotify；一次投递成功，原生调用至服务器接收约 0.86 秒。用户确认通知的问题与选项完整。渠道凭据和原始会话文件不进入仓库。

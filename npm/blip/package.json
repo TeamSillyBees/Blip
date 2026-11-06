@@ -1,7 +1,7 @@
 {
   "name": "@teamsillybees/blip",
-  "version": "0.2.0-dev.4",
-  "description": "Local Codex notifications with interactive configuration",
+  "version": "0.2.0-dev.5",
+  "description": "Local agent handoff notifications with interactive configuration",
   "bin": {
     "blip": "bin/blip.cjs"
   },
@@ -25,11 +25,11 @@
     "access": "public"
   },
   "optionalDependencies": {
-    "@teamsillybees/blip-darwin-arm64": "0.2.0-dev.4",
-    "@teamsillybees/blip-darwin-x64": "0.2.0-dev.4",
-    "@teamsillybees/blip-linux-arm64": "0.2.0-dev.4",
-    "@teamsillybees/blip-linux-x64": "0.2.0-dev.4",
-    "@teamsillybees/blip-win32-arm64": "0.2.0-dev.4",
-    "@teamsillybees/blip-win32-x64": "0.2.0-dev.4"
+    "@teamsillybees/blip-darwin-arm64": "0.2.0-dev.5",
+    "@teamsillybees/blip-darwin-x64": "0.2.0-dev.5",
+    "@teamsillybees/blip-linux-arm64": "0.2.0-dev.5",
+    "@teamsillybees/blip-linux-x64": "0.2.0-dev.5",
+    "@teamsillybees/blip-win32-arm64": "0.2.0-dev.5",
+    "@teamsillybees/blip-win32-x64": "0.2.0-dev.5"
   }
 }
