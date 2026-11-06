@@ -53,7 +53,7 @@ blip service uninstall   # 停止并删除服务，取消开机自启
 
 服务以 `NT AUTHORITY\LocalService` 运行，无需保存 Windows 密码；它是 Windows 内置的低权限账户。[Microsoft LocalService 说明](https://learn.microsoft.com/en-us/windows/win32/services/localservice-account)
 
-安装器为此服务启用独立服务 SID，并只向该身份授予所需权限：读取配置及 Codex `sessions`，修改队列目录。安装时若存在 `session_index.jsonl`，另外授予该文件的读取权限，以显示对话名称；不会授权读取整个 Codex 目录。原有用户权限保留，普通用户的 Codex hook 仍能入队。配置目录的读取权限支持向导原子替换配置文件；不会把整个用户目录授权给服务。
+安装器为此服务启用独立服务 SID，并只向该身份授予所需权限：读取配置及 Codex `sessions`，修改队列目录。来源 home 本身只授予不继承的属性查询与路径遍历权限，用于核对来源身份，不允许目录列表或读取其中的凭据文件。安装时若存在 `session_index.jsonl`，另外授予该文件的读取权限，以显示对话名称。原有用户权限保留，普通用户的 Codex hook 仍能入队。配置目录的读取权限支持向导原子替换配置文件；不会把整个用户目录授权给服务。
 
 配置、队列和 Codex 目录在安装时解析为绝对路径。服务仍读取原配置文件；缺省目录使用安装时记录的值，不会改用 LocalService 的个人目录。服务模式要求本地磁盘中的独立配置和数据目录，不支持网络路径或相关路径中的目录联接、符号链接。
 
@@ -74,6 +74,8 @@ blip service uninstall   # 停止并删除服务，取消开机自启
 ## 恢复与诊断
 
 服务初始化期间报告“正在启动”，工作进程就绪后才报告“正在运行”。停止或系统关机时会取消工作并等待退出，未确认送达的通知留待下次恢复。
+
+服务不读取 Codex `hooks.json`，因此服务侧安装诊断可能显示 `unreadable_configuration`；这不等于 hook 未安装。可在原用户终端运行 `blip doctor` 检查配置与最近回调。`status` 中的来源 `state`、`error_code` 和 `degraded` 才反映采集是否受阻。
 
 服务异常退出时，Windows 分别在 5 秒和 30 秒后尝试重启，之后停止自动重试；连续 24 小时无故障后重置故障计数。手动停止正常退出，不触发此恢复行为。
 

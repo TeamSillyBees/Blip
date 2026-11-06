@@ -29,6 +29,7 @@ type permissionTarget struct {
 const readExecute = windows.FILE_GENERIC_READ | windows.FILE_GENERIC_EXECUTE
 const modify = readExecute | windows.FILE_GENERIC_WRITE | windows.DELETE
 const inheritChildren = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
+const identifyDirectory = windows.FILE_READ_ATTRIBUTES | windows.FILE_TRAVERSE | windows.SYNCHRONIZE
 const deleteChildAccess = 0x0040 // FILE_DELETE_CHILD, absent from x/sys v0.47.0.
 
 var deleteACE = windows.NewLazySystemDLL("advapi32.dll").NewProc("DeleteAce")
@@ -92,7 +93,9 @@ func permissionTargets(m installMetadata) []permissionTarget {
 		{m.StateDir, modify, inheritChildren, true},
 	}
 	if m.Format != 2 {
-		targets = append(targets, permissionTarget{filepath.Join(m.CodexHome, "sessions"), readExecute, inheritChildren, true})
+		targets = append(targets,
+			permissionTarget{m.CodexHome, identifyDirectory, 0, true},
+			permissionTarget{filepath.Join(m.CodexHome, "sessions"), readExecute, inheritChildren, true})
 	}
 	// The title index is optional. Read only an existing regular file; granting
 	// access to CodexHome would also expose credentials and other configuration.
@@ -103,6 +106,13 @@ func permissionTargets(m installMetadata) []permissionTarget {
 		}
 	}
 	if m.Format == 2 {
+		for _, source := range m.Sources {
+			if source.Enabled {
+				// Identity binding needs metadata, never a directory listing or
+				// inherited access to credentials/configuration in the home.
+				targets = append(targets, permissionTarget{source.Home, identifyDirectory, 0, true})
+			}
+		}
 		for _, entry := range m.ReadPaths {
 			if entry.Optional {
 				if noReparsePoints(entry.Path) != nil {

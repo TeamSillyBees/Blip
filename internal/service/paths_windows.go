@@ -228,9 +228,14 @@ func validateRecordedGrants(m installMetadata) error {
 	// an installation whose optional title index no longer exists.
 	allowed := []string{filepath.Dir(m.ConfigPath), m.ConfigPath, m.StateDir}
 	if m.Format != 2 {
-		allowed = append(allowed, filepath.Join(m.CodexHome, "sessions"), filepath.Join(m.CodexHome, "session_index.jsonl"))
+		allowed = append(allowed, m.CodexHome, filepath.Join(m.CodexHome, "sessions"), filepath.Join(m.CodexHome, "session_index.jsonl"))
 	}
 	if m.Format == 2 {
+		for _, source := range m.Sources {
+			if source.Enabled {
+				allowed = append(allowed, source.Home)
+			}
+		}
 		for _, entry := range m.ReadPaths {
 			allowed = append(allowed, entry.Path)
 		}

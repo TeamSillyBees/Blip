@@ -9,6 +9,7 @@ import (
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
+	"golang.org/x/sys/windows"
 )
 
 func TestMultiSourceServiceRecordsOnlyRequiredReadPaths(t *testing.T) {
@@ -31,7 +32,9 @@ func TestMultiSourceServiceRecordsOnlyRequiredReadPaths(t *testing.T) {
 	for _, target := range permissionTargets(m) {
 		for _, source := range sources {
 			if samePath(target.path, source.Home) {
-				t.Fatal("entire harness home was granted")
+				if !source.Enabled || target.permissions != identifyDirectory || target.inheritance != 0 || target.permissions&windows.FILE_LIST_DIRECTORY != 0 {
+					t.Fatal("harness home grant is not limited to enabled-source metadata")
+				}
 			}
 		}
 		if samePath(target.path, filepath.Join(sources[2].Home, "sessions")) {

@@ -229,7 +229,10 @@ func TestServiceTitleIndexPermissionIsOptionalAndNarrow(t *testing.T) {
 			}
 			indexTargets := 0
 			for _, target := range permissionTargets(m) {
-				for _, forbidden := range []string{m.CodexHome, filepath.Join(m.CodexHome, "auth.json"), filepath.Join(m.CodexHome, "config.toml")} {
+				if samePath(target.path, m.CodexHome) && (target.permissions != identifyDirectory || target.inheritance != 0) {
+					t.Fatalf("source identity grant permits reading the home: %+v", target)
+				}
+				for _, forbidden := range []string{filepath.Join(m.CodexHome, "auth.json"), filepath.Join(m.CodexHome, "config.toml")} {
 					if samePath(target.path, forbidden) {
 						t.Fatalf("unexpected broad or private Codex grant: %+v", target)
 					}
@@ -299,7 +302,7 @@ func TestServiceTitleIndexGrantValidationAndCleanup(t *testing.T) {
 	if err := validateRecordedGrants(m); err != nil {
 		t.Fatalf("title index grant rejected: %v", err)
 	}
-	for _, path := range append([]string{m.CodexHome, indexPath + ".private", filepath.Join(indexPath, "child")}, privatePaths...) {
+	for _, path := range append([]string{indexPath + ".private", filepath.Join(indexPath, "child")}, privatePaths...) {
 		invalid := m
 		invalid.Grants = []aclChange{{Path: path, SID: sid.String()}}
 		if validateRecordedGrants(invalid) == nil {

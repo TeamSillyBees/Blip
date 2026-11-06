@@ -174,6 +174,9 @@ func (a *codexAdapter) InstallationStatus() string {
 	}
 	data, err := os.ReadFile(filepath.Join(a.source.Home, "hooks.json"))
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return "unreadable_configuration"
+		}
 		return "missing_configuration"
 	}
 	var root struct {

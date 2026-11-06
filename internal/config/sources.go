@@ -98,7 +98,7 @@ func CanonicalHome(home string) (string, error) {
 	current := filepath.Clean(abs)
 	var suffix []string
 	for {
-		resolved, resolveErr := filepath.EvalSymlinks(current)
+		resolved, resolveErr := resolveHomePath(current)
 		if resolveErr == nil {
 			for i := len(suffix) - 1; i >= 0; i-- {
 				resolved = filepath.Join(resolved, suffix[i])
