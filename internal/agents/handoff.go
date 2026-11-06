@@ -73,10 +73,10 @@ func (h handoffs) read(key string) (handoffState, bool, error) {
 			continue
 		}
 		if err != nil || state.Format != 1 || state.Revision == 0 || state.SessionID == "" || state.TurnKey == "" || h.key(state.SessionID, state.TurnKey) != key {
-			return newest, false, ErrCheckpoint
+			return newest, false, checkpointFailed("handoff", key, "")
 		}
 		if state.Candidate != nil && (state.Candidate.OccurredAt.IsZero() || state.Candidate.DueAt.IsZero()) {
-			return newest, false, ErrCheckpoint
+			return newest, false, checkpointFailed("handoff", key, "")
 		}
 		if !found || state.Revision > newest.Revision {
 			newest = state
@@ -168,6 +168,12 @@ func (h handoffs) finish(ctx context.Context, e event.Event, turnKey string, emi
 			return nil
 		}
 		e.ID = h.id(state)
+		if state.Candidate != nil && (e.ReceivedAt.IsZero() || state.Candidate.OccurredAt.Before(e.ReceivedAt)) {
+			e.ReceivedAt = state.Candidate.OccurredAt
+			// The earlier Stop had no native timestamp; a later completion's
+			// timestamp must not be paired with that Stop's receipt time.
+			e.SignalAt = time.Time{}
+		}
 		if err := emit(e); err != nil {
 			return err
 		}
@@ -226,6 +232,9 @@ func (h handoffs) request(ctx context.Context, e event.Event, turnKey string, em
 		state.RequestKind = e.Kind
 		state.RequestID = identity
 		state.LastSignalAt = e.OccurredAt
+		if state.Candidate != nil {
+			state.CoveredByRequest = true
+		}
 		state.Candidate = nil
 		return nil
 	})
@@ -233,7 +242,12 @@ func (h handoffs) request(ctx context.Context, e event.Event, turnKey string, em
 
 func (h handoffs) stop(ctx context.Context, session, turnKey, nativeTurn, cwd string, now time.Time) error {
 	return h.mutate(ctx, session, turnKey, nativeTurn, func(state *handoffState) error {
-		if state.Notified || state.Cancelled || state.RequestKind != "" || state.Candidate != nil {
+		if state.Notified || state.Cancelled || state.CoveredByRequest || state.Candidate != nil {
+			return nil
+		}
+		if state.RequestKind != "" {
+			state.CoveredByRequest = true
+			state.LastSignalAt = now.UTC()
 			return nil
 		}
 		state.Candidate = &stopCandidate{OccurredAt: now.UTC(), DueAt: now.Add(time.Second).UTC(), CWD: cwd}
@@ -346,11 +360,12 @@ func (h handoffs) flush(ctx context.Context, now time.Time, emit func(event.Even
 			if candidate == nil || candidate.DueAt.After(now) {
 				return nil
 			}
-			if current.Notified || current.Cancelled || current.RequestKind != "" {
+			if current.Notified || current.Cancelled || current.CoveredByRequest || current.RequestKind != "" {
 				current.Candidate = nil
 				return nil
 			}
 			e := event.Event{SchemaVersion: 2, ID: h.id(current), Agent: h.source.Harness, SourceID: h.source.ID, Kind: event.AttentionRequired, Reason: "stop_signal", Source: h.source.Harness + "/hooks", OccurredAt: candidate.OccurredAt, SessionID: current.SessionID, TurnID: current.NativeTurnID, CWD: candidate.CWD, Detail: "收到停止信号，请回到原会话查看。"}
+			e.ReceivedAt = candidate.OccurredAt
 			e.Project = harnessProject(candidate.CWD, e.AgentName())
 			if err := emit(e); err != nil {
 				return err

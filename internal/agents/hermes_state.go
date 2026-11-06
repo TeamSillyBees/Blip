@@ -52,7 +52,7 @@ func (a *hermesAdapter) withSession(ctx context.Context, session string, fn func
 	s := hermesSession{Format: 1, SessionID: session, Sequence: 1}
 	err = store.ReadJSON(path, &s)
 	if (err != nil && !errors.Is(err, os.ErrNotExist)) || s.Format != 1 || s.SessionID != session || s.Sequence == 0 {
-		return ErrCheckpoint
+		return checkpointFailed("hermes-session", event.ID(session), session)
 	}
 	if err := fn(&s); err != nil {
 		return err

@@ -44,7 +44,7 @@ func (a *claudeAdapter) legacyTurn(ctx context.Context, hook claudeHook, now tim
 	err = store.ReadJSON(path, &state)
 	missing := errors.Is(err, os.ErrNotExist)
 	if (err != nil && !missing) || state.Format != 1 || state.SessionID != hook.SessionID || state.Sequence == 0 {
-		return "", ErrCheckpoint
+		return "", checkpointFailed("claude-prompt", event.ID(hook.SessionID), hook.SessionID)
 	}
 	changed := missing
 	if hook.Name == "UserPromptSubmit" {

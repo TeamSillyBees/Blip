@@ -121,12 +121,14 @@ func (a *codexAdapter) Poll(ctx context.Context, emit func(event.Event) error) e
 				return a.ledger.cancel(ctx, session, turn, turn, signal.OccurredAt)
 			case "turn_failed", "task_failed":
 				e := event.Event{SchemaVersion: 2, Agent: "codex", SourceID: a.source.ID, Source: "codex/rollout", Kind: event.AttentionRequired, Reason: "error", SessionID: session, TurnID: turn, OccurredAt: signal.OccurredAt, Project: event.Project(signal.CWD), CWD: signal.CWD, Detail: "本轮因异常停止，请查看原会话中的原因。"}
+				e.ReceivedAt, e.SignalAt = time.Now().UTC(), signal.OccurredAt
 				return a.ledger.finish(ctx, e, turn, emit)
 			}
 			return nil
 		}
 	}
 	err := a.collector.Poll(ctx, func(e event.Event) error {
+		e.ReceivedAt, e.SignalAt = time.Now().UTC(), e.OccurredAt
 		e = a.normalize(e)
 		if a.source.EventVersion == 2 {
 			return a.ledger.finish(ctx, e, e.TurnID, emit)
@@ -134,7 +136,7 @@ func (a *codexAdapter) Poll(ctx context.Context, emit func(event.Event) error) e
 		return emit(e)
 	})
 	if errors.Is(err, codex.ErrCheckpoint) {
-		return errors.Join(ErrCheckpoint, err)
+		return errors.Join(checkpointFailed("codex-rollout", event.ID("codex-rollout"), ""), err)
 	}
 	if err != nil {
 		return err

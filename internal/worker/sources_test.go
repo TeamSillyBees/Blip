@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,5 +98,46 @@ func TestSourcePollBudgetAndShutdown(t *testing.T) {
 	err := runWithRegistry(ctx, c, log.New(io.Discard, "", 0), nil, agents.Registry{"slow": func(config.Config, config.Source) agents.Adapter { return blockedAdapter{} }})
 	if err != nil || time.Since(start) > time.Second {
 		t.Fatalf("slow collector blocked shutdown: %v", err)
+	}
+}
+
+func TestPureHookFailureDegradesWorkerAndSuccessfulHookClearsIt(t *testing.T) {
+	root := t.TempDir()
+	c := config.Config{SchemaVersion: 2, Path: filepath.Join(root, "config.json"), StateDir: filepath.Join(root, "state"), PollInterval: "30ms", RequestTimeout: "1s", Sources: []config.Source{{ID: "hermes", Harness: "hermes", Home: filepath.Join(root, "hermes"), Enabled: true, EventVersion: 2}}}
+	if err := agents.Capture(context.Background(), c, "hermes", strings.NewReader("invalid")); err == nil {
+		t.Fatal("invalid payload accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- RunWithReady(ctx, c, log.New(io.Discard, "", 0), func() { ready <- struct{}{} }) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker not ready")
+	}
+	var status Status
+	if err := store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &status); err != nil || !status.Degraded || status.Sources[0].ErrorCode != "hook_failed" {
+		t.Fatal(status, err)
+	}
+	if err := agents.Capture(ctx, c, "hermes", strings.NewReader(`{"hook_event_name":"on_session_end","session_id":"s","extra":{"turn_id":"t","completed":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &status); err == nil && !status.Degraded && status.Sources[0].State == "ready" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("hook health did not recover", status)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

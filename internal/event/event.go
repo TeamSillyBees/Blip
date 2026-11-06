@@ -28,6 +28,10 @@ type Question struct {
 
 // Event is versioned independently of Codex's input formats.
 type Event struct {
+	// Local delivery timing travels to Queue.Enqueue separately from the wire
+	// event. Never expose it in either webhook schema or use it for identity.
+	ReceivedAt    time.Time  `json:"-"`
+	SignalAt      time.Time  `json:"-"`
 	SchemaVersion int        `json:"schema_version"`
 	ID            string     `json:"id"`
 	Agent         string     `json:"agent"`

@@ -73,6 +73,7 @@ func (a *dshAdapter) hookEvent(h dshHook, now time.Time) *event.Event {
 		now = h.OccurredAt
 	}
 	e := event.Event{SchemaVersion: 2, Agent: "dsh", SourceID: a.source.ID, Source: "dsh/native-plugin", SessionID: h.SessionID, TurnID: h.TurnID, CWD: h.CWD, Project: harnessProject(h.CWD, "DSH"), OccurredAt: now.UTC()}
+	e.SignalAt = h.OccurredAt
 	switch h.Name {
 	case "turn/end":
 		switch h.Reason {

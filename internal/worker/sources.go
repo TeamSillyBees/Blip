@@ -42,6 +42,10 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 		report(sourceUpdate{state: "unavailable", code: "adapter_unavailable", err: err})
 		return
 	}
+	if err = agents.CheckSourceCheckpoint(ctx, c, source); err != nil {
+		report(sourceUpdate{state: "paused", code: "checkpoint_invalid", err: err})
+		return
+	}
 	collector, ok := adapter.(agents.Collector)
 	if !ok {
 		report(sourceUpdate{state: "ready"})
@@ -50,23 +54,29 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 	for {
 		update := sourceUpdate{state: "ready"}
 		pollCtx, stop := context.WithTimeout(ctx, 3*time.Second)
-		err = collector.Poll(pollCtx, func(e event.Event) error {
-			e.DeviceName = c.DeviceName
-			if resolver, ok := adapter.(agents.TitleResolver); ok {
-				titleCtx, cancel := context.WithTimeout(pollCtx, 50*time.Millisecond)
-				e.SessionTitle = resolver.SessionTitle(titleCtx, e.SessionID)
-				cancel()
-			}
-			_, err := queue.Enqueue(pollCtx, e, DestinationIDs(c))
-			if err != nil && pollCtx.Err() == nil {
-				update.fatal = err
-			}
-			if err == nil {
-				now := time.Now().UTC()
-				update.eventAt = &now
-			}
-			return err
-		})
+		err = agents.CheckSourceCheckpoint(pollCtx, c, source)
+		if err == nil {
+			err = collector.Poll(pollCtx, func(e event.Event) error {
+				if e.ReceivedAt.IsZero() {
+					e.ReceivedAt = time.Now().UTC()
+				}
+				e.DeviceName = c.DeviceName
+				if resolver, ok := adapter.(agents.TitleResolver); ok {
+					titleCtx, cancel := context.WithTimeout(pollCtx, 50*time.Millisecond)
+					e.SessionTitle = resolver.SessionTitle(titleCtx, e.SessionID)
+					cancel()
+				}
+				_, err := queue.Enqueue(pollCtx, e, DestinationIDs(c))
+				if err != nil && pollCtx.Err() == nil {
+					update.fatal = err
+				}
+				if err == nil {
+					now := time.Now().UTC()
+					update.eventAt = &now
+				}
+				return err
+			})
+		}
 		stop()
 		if ctx.Err() != nil {
 			return
@@ -78,6 +88,12 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 		}
 		pause := errors.Is(err, agents.ErrCheckpoint)
 		if pause {
+			faultCtx, cancel := context.WithTimeout(ctx, time.Second)
+			faultErr := agents.RecordCheckpointFault(faultCtx, c, source, err)
+			cancel()
+			if faultErr != nil {
+				update.err = errors.Join(err, faultErr)
+			}
 			update.state = "paused"
 			update.code = "checkpoint_invalid"
 		}

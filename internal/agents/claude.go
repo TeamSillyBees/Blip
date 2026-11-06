@@ -153,9 +153,21 @@ func (a *claudeAdapter) ConsumeHook(ctx context.Context, data []byte, now time.T
 		}
 		return a.ledger.stop(ctx, h.SessionID, turn, "", h.CWD, now)
 	case "PostToolUse", "PostToolUseFailure":
-		return a.ledger.resolveRequest(ctx, h.SessionID, turn, "", h.ToolUseID, true)
+		if h.ToolUseID == "" {
+			return nil
+		}
+		if err := a.ledger.resolveRequest(ctx, h.SessionID, turn, "", h.ToolUseID, true); err != nil {
+			return err
+		}
+		return a.ledger.resume(ctx, h.SessionID, turn, "", event.ID("resolved-tool", h.ToolUseID), false, now)
 	case "ElicitationResult":
-		return a.ledger.resolveRequest(ctx, h.SessionID, turn, "", h.ElicitationID, true)
+		if h.ElicitationID == "" {
+			return nil
+		}
+		if err := a.ledger.resolveRequest(ctx, h.SessionID, turn, "", h.ElicitationID, true); err != nil {
+			return err
+		}
+		return a.ledger.resume(ctx, h.SessionID, turn, "", event.ID("resolved-elicitation", h.ElicitationID), false, now)
 	case "PreToolUse":
 		if h.ToolUseID != "" {
 			if err := a.ledger.resume(ctx, h.SessionID, turn, "", event.ID("tool", h.ToolUseID), false, now); err != nil {

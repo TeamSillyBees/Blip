@@ -242,6 +242,16 @@ func validCheckpoint(state checkpoint) bool {
 	return true
 }
 
+// ValidateCheckpoint verifies a restored checkpoint without changing its
+// baseline or reading source logs. A missing file is not a valid restoration.
+func ValidateCheckpoint(path string) error {
+	var state checkpoint
+	if store.ReadJSON(path, &state) != nil || !validCheckpoint(state) {
+		return ErrCheckpoint
+	}
+	return nil
+}
+
 func (c *Collector) Poll(ctx context.Context, emit func(event.Event) error) error {
 	if !c.loaded {
 		err := store.ReadJSON(c.StatePath, &c.state)

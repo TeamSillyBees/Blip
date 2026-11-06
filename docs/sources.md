@@ -61,6 +61,12 @@ blip sources remove --source codex-work
 
 `status` 同时显示公共 `ready`、逐来源 `sources`、`degraded` 和目的地收据。来源 checkpoint 损坏时保留原文件并暂停该来源，其他来源和旧队列继续运行。未知或已移除 adapter 不影响旧事件校验与发送。
 
+纯 hook 来源最近一次回调失败也会使 `degraded` 为 true。关联文件损坏会保存 `checkpoint-fault.json`，此后的该来源回调暂停；恢复原文件并通过校验后，下一次回调或 worker 重启会解除暂停。删除关联文件不是恢复，不会自动重建基线。已经暂停的 collector 在修复后需要重启 worker。普通无关回调不会抹掉“最近一次通知事件”的时间。
+
+`latency.by_source_destination` 按来源和目的地报告本地接收至首次投递尝试的 P95，以及有原生时间时的信号至接收 P95。统计范围是当前保留的队列，包括离线、积压和渠道发送间隔；`samples` 为可测样本数。旧记录缺少时间时不估算，时钟倒退产生的负值列入 `skipped_clock_samples`。
+
+`first_attempt_at` 表示发送器调度开始，在调用发送器之前持久化；不表示服务端接收或手机显示。程序若在保存标记后、网络调用前崩溃，记录中仍保留该次调度开始。重试和重启不重置它，也不改变事件发生时间。新增时间仅在本地队列外层记录，webhook v1/v2 的事件格式不受影响。
+
 新增来源状态在 `data/sources/<id>/`；默认 Codex 仍保留旧状态位置，新增绑定与 hook 诊断保存在其 `sources/codex-default/` 下。不要为了消除错误而删除 checkpoint 或绑定。
 
 回退旧版本前，停止新 worker 和服务，确认无待处理 v2 事件，再恢复旧配置。只恢复 `config.json.bak` 并不足以让旧程序安全处理 v2 队列。启用 v2 前应同时升级用户 hook 程序和 Windows 服务副本。

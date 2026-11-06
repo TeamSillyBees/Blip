@@ -61,6 +61,21 @@ func (d Dispatcher) DeliverOnce(ctx context.Context, destination config.Destinat
 				}
 				stop()
 			}
+			if receipt.FirstAttemptAt == nil && receipt.Attempts == 0 {
+				// Persist the start of dispatch before calling the sender. This is
+				// a local attempt marker, not a receipt of network delivery.
+				startedAt := time.Now().UTC()
+				writeCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+				err = d.Queue.UpdateDelivery(writeCtx, job.Event.ID, destination.ID, func(current *store.Delivery) {
+					if current.FirstAttemptAt == nil && current.Attempts == 0 {
+						current.FirstAttemptAt = &startedAt
+					}
+				})
+				stop()
+				if err != nil {
+					return false, err
+				}
+			}
 			sendCtx, cancel := context.WithTimeout(ctx, d.Timeout)
 			sendErr := d.Sender.Send(sendCtx, destination, notification)
 			cancel()
@@ -199,6 +214,10 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 		go func() { defer group.Done(); collectSource(ctx, c, source, index, registry, queue, updates) }()
 	}
 	checked := make([]bool, len(sources))
+	collection := make([]sourceUpdate, len(sources))
+	for i := range collection {
+		collection[i].state = "checking"
+	}
 	interval := c.PollDuration()
 	if interval <= 0 || interval > time.Second {
 		interval = time.Second
@@ -213,7 +232,9 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 		status.Ready = true
 		for i := range status.Sources {
 			s := &status.Sources[i]
+			s.State, s.ErrorCode = collection[i].state, collection[i].code
 			agents.RefreshHookDiagnostic(c, s)
+			agents.ApplyHookHealth(s)
 			if !checked[i] {
 				status.Ready = false
 			}
@@ -261,6 +282,7 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 			return err
 		case update := <-updates:
 			checked[update.index] = true
+			collection[update.index] = update
 			s := &status.Sources[update.index]
 			s.State, s.ErrorCode = update.state, update.code
 			if update.eventAt != nil {

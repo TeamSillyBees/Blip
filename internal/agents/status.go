@@ -40,7 +40,7 @@ func Inspect(c config.Config, s config.Source) SourceStatus {
 		return status
 	}
 	status.Capabilities = adapter.Capabilities()
-	if err := CheckBinding(c, s); err != nil {
+	if err := CheckBinding(c, s); s.Enabled && err != nil {
 		status.State = "paused"
 		status.ErrorCode = "source_binding"
 	}
@@ -48,6 +48,7 @@ func Inspect(c config.Config, s config.Source) SourceStatus {
 		status.Installation = installer.InstallationStatus()
 	}
 	RefreshHookDiagnostic(c, &status)
+	ApplyHookHealth(&status)
 	return status
 }
 
@@ -56,8 +57,24 @@ func RefreshHookDiagnostic(c config.Config, s *SourceStatus) {
 	if store.ReadJSON(DiagnosticPath(c, s.ID), &diagnostic) == nil && !diagnostic.ReceivedAt.IsZero() {
 		s.LastReceivedAt = &diagnostic.ReceivedAt
 		s.LastHookError = diagnostic.ErrorCode
-		if diagnostic.LastEventAt != nil {
+		if diagnostic.LastEventAt != nil && (s.LastEventAt == nil || diagnostic.LastEventAt.After(*s.LastEventAt)) {
 			s.LastEventAt = diagnostic.LastEventAt
 		}
+	}
+	if hasCheckpointFault(c, s.ID) {
+		s.LastHookError = "checkpoint_invalid"
+	} else if s.LastHookError == "checkpoint_invalid" {
+		// The exact checkpoint was revalidated after repair.
+		s.LastHookError = ""
+	}
+}
+
+func ApplyHookHealth(s *SourceStatus) {
+	if !s.Enabled || s.ErrorCode != "" || s.LastHookError == "" {
+		return
+	}
+	s.State, s.ErrorCode = "degraded", s.LastHookError
+	if s.LastHookError == "checkpoint_invalid" {
+		s.State = "paused"
 	}
 }

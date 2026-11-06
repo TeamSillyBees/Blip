@@ -79,8 +79,13 @@ func printStatus(c config.Config, output io.Writer) error {
 		for _, source := range c.EffectiveSources() {
 			state.Sources = append(state.Sources, agents.Inspect(c, source))
 		}
+		for _, source := range state.Sources {
+			if source.Enabled && source.ErrorCode != "" {
+				state.Degraded = true
+			}
+		}
 	}
-	return json.NewEncoder(output).Encode(map[string]any{"running": running, "ready": running && state.Ready, "degraded": state.Degraded, "sources": state.Sources, "pending": pending, "delivered": delivered, "failed": failed, "quarantined": quarantined, "state_dir": c.StateDir, "destinations": destinations, "collector_error": state.CollectorError})
+	return json.NewEncoder(output).Encode(map[string]any{"running": running, "ready": running && state.Ready, "degraded": state.Degraded, "sources": state.Sources, "pending": pending, "delivered": delivered, "failed": failed, "quarantined": quarantined, "state_dir": c.StateDir, "destinations": destinations, "collector_error": state.CollectorError, "latency": map[string]any{"scope": "retained_queue", "by_source_destination": summarizeLatency(jobs)}})
 }
 
 func receiptErrorTime(job store.Job, receipt store.Delivery) time.Time {

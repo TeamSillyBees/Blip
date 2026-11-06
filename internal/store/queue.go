@@ -17,19 +17,22 @@ import (
 )
 
 type Delivery struct {
-	DestinationID string     `json:"destination_id"`
-	Attempts      int        `json:"attempts"`
-	NextAttempt   time.Time  `json:"next_attempt"`
-	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
-	DeliveredAt   *time.Time `json:"delivered_at,omitempty"`
-	Failed        bool       `json:"failed,omitempty"`
-	FailedAt      *time.Time `json:"failed_at,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
+	DestinationID  string     `json:"destination_id"`
+	Attempts       int        `json:"attempts"`
+	NextAttempt    time.Time  `json:"next_attempt"`
+	FirstAttemptAt *time.Time `json:"first_attempt_at,omitempty"`
+	LastAttemptAt  *time.Time `json:"last_attempt_at,omitempty"`
+	DeliveredAt    *time.Time `json:"delivered_at,omitempty"`
+	Failed         bool       `json:"failed,omitempty"`
+	FailedAt       *time.Time `json:"failed_at,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
 }
 
 type Job struct {
 	Event      event.Event `json:"event"`
 	CreatedAt  time.Time   `json:"created_at"`
+	ReceivedAt *time.Time  `json:"received_at,omitempty"`
+	SignalAt   *time.Time  `json:"signal_at,omitempty"`
 	Deliveries []Delivery  `json:"deliveries"`
 }
 
@@ -120,6 +123,14 @@ func (q Queue) Enqueue(ctx context.Context, e event.Event, destinations []string
 		return false, err
 	}
 	job := Job{Event: e, CreatedAt: time.Now().UTC(), Deliveries: []Delivery{}}
+	if !e.ReceivedAt.IsZero() {
+		received := e.ReceivedAt.UTC()
+		job.ReceivedAt = &received
+	}
+	if !e.SignalAt.IsZero() {
+		signal := e.SignalAt.UTC()
+		job.SignalAt = &signal
+	}
 	seen := map[string]bool{}
 	for _, id := range destinations {
 		if id != "" && !seen[id] {
@@ -358,6 +369,9 @@ func validateJob(job Job, name string) error {
 	if job.CreatedAt.IsZero() || len(job.Deliveries) == 0 {
 		return fmt.Errorf("missing creation time or delivery receipts")
 	}
+	if (job.ReceivedAt != nil && job.ReceivedAt.IsZero()) || (job.SignalAt != nil && job.SignalAt.IsZero()) {
+		return fmt.Errorf("invalid local timing metadata")
+	}
 	seen := map[string]bool{}
 	for _, d := range job.Deliveries {
 		if d.DestinationID == "" || seen[d.DestinationID] || d.Attempts < 0 {
@@ -365,6 +379,9 @@ func validateJob(job Job, name string) error {
 		}
 		if d.LastAttemptAt != nil && d.LastAttemptAt.IsZero() {
 			return fmt.Errorf("invalid last attempt time")
+		}
+		if d.FirstAttemptAt != nil && d.FirstAttemptAt.IsZero() {
+			return fmt.Errorf("invalid first attempt time")
 		}
 		seen[d.DestinationID] = true
 		if d.DeliveredAt != nil && (d.DeliveredAt.IsZero() || d.Failed) {

@@ -108,6 +108,15 @@ func TestParallelRequestsAndLateReplayStayResolved(t *testing.T) {
 	if len(ledgerEvents(t, h)) != 2 {
 		t.Fatal("late completion duplicated the stop already covered by a request")
 	}
+	if err := h.stop(ctx, "s", "t", "t", "/p", now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.flush(ctx, now.Add(3*time.Second), emit); err != nil {
+		t.Fatal(err)
+	}
+	if len(ledgerEvents(t, h)) != 2 {
+		t.Fatal("late Stop duplicated a covered request")
+	}
 	if err := h.resume(ctx, "s", "t", "t", "continued-tool", false, now.Add(3*time.Second)); err != nil {
 		t.Fatal(err)
 	}
