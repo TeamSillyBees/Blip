@@ -2,7 +2,7 @@
 
 Blip 的 npm 包包含一个轻量 Node.js 启动器，并通过 npm 的可选依赖选择本机平台的 Go 可执行文件。用户不需要 Go 编译器，安装期间不执行下载脚本。命令名称为 `blip`；后台进程和 Codex hook 仍直接运行本地 Go 程序。
 
-当前版本为 `0.2.0-dev.0`，包名为 `@teamsillybees/blip`。本仓库提供打包和安装验证工具，尚未把此版本发布到公共 npm 注册表。
+当前版本为 `0.2.0-dev.0`，包名为 `@teamsillybees/blip`，预发行版本使用 `next` 标签。公共 npm 安装命令为 `npm install -g @teamsillybees/blip@next`；本仓库同时提供打包和本地安装验证工具。
 
 ## 本地构建并安装
 
@@ -20,7 +20,7 @@ blip version
 blip configure
 ```
 
-上述两个本地包需要一起安装；`--offline` 可避免请求尚未发布的其他平台包。安装到默认全局目录需要该目录的写入权限，也可以使用 npm 的 `--prefix` 指定自己的安装目录并将其命令目录加入 PATH。测试脚本只使用临时 prefix，不改变用户现有全局安装。
+上述两个本地包需要一起安装；`--offline` 保证该验证只使用本地 tarball 和缓存，不访问 npm 注册表。安装到默认全局目录需要该目录的写入权限，也可以使用 npm 的 `--prefix` 指定自己的安装目录并将其命令目录加入 PATH。测试脚本只使用临时 prefix，不改变用户现有全局安装。
 
 构建所有平台：
 
@@ -75,4 +75,4 @@ npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.0-dev.0.tgz --access pub
 npm publish ./dist/npm/teamsillybees-blip-0.2.0-dev.0.tgz --access public --tag next
 ```
 
-发布后用户可运行 `npm install -g @teamsillybees/blip@next`；正式版本发布到 `latest` 后，才使用不带 tag 的 `npm install -g @teamsillybees/blip`。这些是发布操作说明，仓库脚本不会自动执行 publish。
+安装当前预发行版使用 `npm install -g @teamsillybees/blip@next`。本次首次发布后，npm 同时设置了 `latest` 和 `next`；删除 `latest` 的请求返回 HTTP 400，因此当前 `latest` 不代表正式版。正式版本发布后再将 `latest` 指向正式版本。仓库脚本不会自动执行 publish。

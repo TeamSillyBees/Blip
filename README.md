@@ -18,10 +18,10 @@ Hook 安装按 Codex `0.163.0` 的配置协议实现；更早版本需要另行�
 
 Blip 支持 npm 安装和直接运行可执行文件。npm 包提供对应平台的预编译 Go 程序，安装和使用不需要 Go 编译器；npm 启动器需要 Node.js 20 或更新版本。配置与通知队列保存在用户目录，升级 npm 包不会将它们写入包安装目录。
 
-计划发布的包名为 `@teamsillybees/blip`。**当前仓库已具备打包能力，尚未将本版本发布到 npm 注册表**；本地安装包的构建、安装与发布说明见 [npm 分发](docs/npm-distribution.md)。发布后使用：
+npm 包名为 `@teamsillybees/blip`，当前预发行版本使用 `next` 标签。本地安装包的构建、安装与发布说明见 [npm 分发](docs/npm-distribution.md)。安装预发行版：
 
 ```powershell
-npm install -g @teamsillybees/blip
+npm install -g @teamsillybees/blip@next
 blip configure
 blip install codex
 blip start
