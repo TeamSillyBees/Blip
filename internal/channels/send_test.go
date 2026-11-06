@@ -17,7 +17,7 @@ import (
 )
 
 func sample(kind event.Kind) event.Event {
-	return event.Event{SchemaVersion: 1, ID: event.ID("test", string(kind)), Agent: "codex", DeviceName: "开发工作站🙂", Kind: kind, Source: "codex/hooks", OccurredAt: time.Unix(1599360473, 0).UTC(), SessionID: "session", SessionTitle: "实现新的通知模板", TurnID: "turn", Project: "中文项目", Detail: "不要显示的工具或回复详情", Questions: []event.Question{{Text: "选择通知渠道？", Options: []string{"飞书：团队群", "Gotify：手机提醒"}}}}
+	return event.Event{SchemaVersion: 1, ID: event.ID("test", string(kind)), Agent: "codex", DeviceName: "开发工作站🙂", Kind: kind, Source: "codex/hooks", OccurredAt: time.Unix(1599360473, 0).UTC(), SessionID: "session", SessionTitle: "实现新的通知模板", TurnID: "turn", Project: "中文项目", Detail: "最后一条回复的内容", Questions: []event.Question{{Text: "选择通知渠道？", Options: []string{"飞书：团队群", "Gotify：手机提醒"}}}}
 }
 
 func TestAllEventKindsReachAllChannelProtocols(t *testing.T) {
@@ -33,7 +33,7 @@ func TestAllEventKindsReachAllChannelProtocols(t *testing.T) {
 				}
 				bodyPrefix := "实现新的通知模板\n时间：" + notification.OccurredAt.Local().Format("2006-01-02 15:04:05 -07:00")
 				wantBody := map[event.Kind]string{
-					event.TurnCompleted:     bodyPrefix,
+					event.TurnCompleted:     bodyPrefix + "\n\n最后一条回复的内容",
 					event.ApprovalRequested: bodyPrefix + "\n\n请在 Codex 中确认审批。",
 					event.InputRequested:    bodyPrefix + "\n\n选择通知渠道？\nA. 飞书：团队群\nB. Gotify：手机提醒",
 				}[kind]

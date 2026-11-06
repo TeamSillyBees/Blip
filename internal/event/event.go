@@ -181,6 +181,9 @@ func (e Event) Body() string {
 		if e.SchemaVersion == 2 {
 			text.WriteString("\n\n本轮已结束，可以查看结果、继续当前工作或安排下一步。")
 		}
+		if detail := strings.TrimSpace(e.Detail); detail != "" {
+			text.WriteString("\n\n" + LimitBytes(detail, 4000))
+		}
 	case InputRequested:
 		if e.SchemaVersion == 2 {
 			text.WriteString("\n\n请回到 " + e.AgentName() + " 回复。")

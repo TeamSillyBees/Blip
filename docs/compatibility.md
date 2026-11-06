@@ -148,6 +148,12 @@ CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失
 
 - 可复跑：设置 `BLIP_TEST_LATENCY=1`，运行 `go test ./internal/worker -run '^TestMultiHarnessLocalLatency$' -v -count=1`。当前记录满足该场景下本地 P95 ≤ 2 秒的目标；离线、积压和渠道限流不属于此测试条件。历史队列统计不自动排除这些延迟，也不根据缺失字段推算旧数据。
 
+## 完成通知的最后回复（2026-11-07，0.2.0-dev.6）
+
+- 完成模板恢复显示事件中的最后回复内容，保留设备名、对话名、事件时间及现有 v2 接手提示。空内容省略，最多显示 4000 字节；企业微信还遵守整条文本 2048 字节限制。
+- Codex 的原生 `task_complete.last_agent_message` 在 v1/v2 路径中均会保留。当前 Hermes、DSH 完成事件没有回复正文；Claude Stop 是中性停止提醒，此次未改变这些来源的事件判定或内容采集。
+- 模板和本机 HTTP 回归验证最后回复投递、换行保留、空白省略及 Unicode 截断。Go 测试、静态检查和本地 npm 打包/安装验证通过；`0.2.0-dev.6` 尚未发布。
+
 ## 一手资料
 
 - [Codex Hooks](https://learn.chatgpt.com/docs/hooks)：事件、信任机制、工具覆盖、默认启用与 commandWindows。

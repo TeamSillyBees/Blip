@@ -11,6 +11,7 @@ import (
 func TestHumanNotificationFormats(t *testing.T) {
 	occurredAt := time.Unix(1, 0).UTC()
 	bodyPrefix := "优化通知展示\n时间：" + occurredAt.Local().Format("2006-01-02 15:04:05 -07:00")
+	const lastReply = "已完成通知展示。\n保留回复中的换行。"
 	questions := []Question{
 		{Text: "请选择通知渠道", Options: []string{"飞书：团队群", "Gotify：手机提醒", "Webhook", "企业微信"}},
 		{Text: "启用测试？", Options: []string{"是", "否"}},
@@ -19,12 +20,12 @@ func TestHumanNotificationFormats(t *testing.T) {
 		kind        Kind
 		title, body string
 	}{
-		{TurnCompleted, "完成 · Blip · 开发工作站", bodyPrefix},
+		{TurnCompleted, "完成 · Blip · 开发工作站", bodyPrefix + "\n\n" + lastReply},
 		{InputRequested, "需要输入 · Blip · 开发工作站", bodyPrefix + "\n\n请选择通知渠道\nA. 飞书：团队群\nB. Gotify：手机提醒\nC. Webhook\nD. 企业微信\n\n启用测试？\nA. 是\nB. 否"},
 		{ApprovalRequested, "需要输入 · Blip · 开发工作站", bodyPrefix + "\n\n请在 Codex 中确认审批。"},
 	} {
 		t.Run(string(entry.kind), func(t *testing.T) {
-			e := Event{Kind: entry.kind, Project: "Blip", SessionTitle: "  优化通知展示  ", DeviceName: "开发工作站", SessionID: "private-session", TurnID: "private-turn", Detail: "private-command-or-reply", OccurredAt: occurredAt, Questions: questions}
+			e := Event{Kind: entry.kind, Project: "Blip", SessionTitle: "  优化通知展示  ", DeviceName: "开发工作站", SessionID: "private-session", TurnID: "private-turn", Detail: lastReply, OccurredAt: occurredAt, Questions: questions}
 			if e.Title() != entry.title || e.Body() != entry.body || e.Text() != entry.title+"\n"+entry.body {
 				t.Fatalf("wrong human notification: title=%q body=%q text=%q", e.Title(), e.Body(), e.Text())
 			}
@@ -34,6 +35,25 @@ func TestHumanNotificationFormats(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCompletionDetailsAreOptionalAndBounded(t *testing.T) {
+	for _, schema := range []int{1, 2} {
+		e := Event{SchemaVersion: schema, Kind: TurnCompleted, SessionTitle: "对话"}
+		base := e.Body()
+		e.Detail = " \n\t "
+		if e.Body() != base {
+			t.Fatalf("schema %d added blank reply content", schema)
+		}
+		e.Detail = strings.Repeat("最后回复🙂", 1000)
+		body := e.Body()
+		if !utf8.ValidString(body) || !strings.HasSuffix(body, "…") || !strings.HasPrefix(body, base+"\n\n") || len(body)-len(base)-2 > 4000 {
+			t.Fatalf("schema %d did not safely bound reply content", schema)
+		}
+		if e.Detail != strings.Repeat("最后回复🙂", 1000) {
+			t.Fatal("rendering changed the structured event")
+		}
 	}
 }
 
