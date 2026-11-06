@@ -153,3 +153,5 @@ npm test
 测试覆盖四类渠道协议、错误响应、Unicode 字节限制、并发去重、独立收据、重试、读取位置恢复，以及真实进程的中文与空格路径、安装卸载、后台启动停止。集成测试仅使用临时 Codex home 和本地 HTTP 服务。`go test -short ./...` 可跳过进程集成测试；具备 C 编译器的环境可运行 `go test -race ./...`。
 
 项目约定见[首版需求](docs/requirements.md)、[术语表](GLOSSARY.md)和[架构决策](docs/adr/)。本项目参考 [hellolib/agent-notify](https://github.com/hellolib/agent-notify/tree/ed2842189eff44009a7bbe946b8a1b29bbc983d4) 的适配器、统一消息与渠道发送器分工，代码独立实现。依赖许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+后续扩展见[多 harness 事件接入设计](docs/multi-harness-design.md)，涵盖适配器、来源身份、兼容迁移和分阶段验收；其中的新配置、命令和其他 harness 接入尚未实现。
