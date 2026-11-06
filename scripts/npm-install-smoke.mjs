@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
@@ -20,7 +20,11 @@ export async function smokeInstall() {
   const target = platforms.getTarget();
   const native = manifest.platforms.find((item) => item.id === target.id);
   assert.ok(native, `Build ${target.id} first: npm run build:npm:current`);
-  const temp = await mkdtemp(join(tmpdir(), 'blip npm smoke '));
+  // Node resolves installed modules through real paths. macOS's temporary
+  // directory can be reached through /var -> /private/var, so use the same root
+  // for installation containment and cleanup checks.
+  const tempRoot = await realpath(tmpdir());
+  const temp = await mkdtemp(join(tempRoot, 'blip npm smoke '));
   try {
     const userConfig = join(temp, 'user.npmrc');
     const globalConfig = join(temp, 'global.npmrc');
@@ -88,7 +92,7 @@ export async function smokeInstall() {
     assert.doesNotMatch(missing.stderr, /MODULE_NOT_FOUND|Require stack:/);
     return { version: manifest.version, platform: target.id, checks: ['offline local tarball install', 'native resolution', 'version', 'help', 'init with spaces', 'nonzero exit', 'npm bin entry', 'missing optional dependency'] };
   } finally {
-    const contained = relative(tmpdir(), resolve(temp));
+    const contained = relative(tempRoot, resolve(temp));
     if (!contained || contained === '..' || contained.startsWith(`..${sep}`) || !contained.startsWith('blip npm smoke ')) {
       throw new Error('Refusing to remove smoke-test files outside the temporary directory.');
     }
