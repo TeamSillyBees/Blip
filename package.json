@@ -1,0 +1,15 @@
+{
+  "name": "blip-development",
+  "version": "0.2.0-dev.0",
+  "private": true,
+  "description": "Development commands for Blip's native npm distribution",
+  "scripts": {
+    "test": "node --test npm/test/launcher.test.cjs npm/test/archive.test.mjs",
+    "build:npm": "node scripts/package-npm.mjs",
+    "build:npm:current": "node scripts/package-npm.mjs --target current",
+    "test:npm-install": "node --test npm/test/install.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

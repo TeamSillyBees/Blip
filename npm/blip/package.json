@@ -1,0 +1,35 @@
+{
+  "name": "@teamsillybees/blip",
+  "version": "0.2.0-dev.0",
+  "description": "Local Codex notifications with interactive configuration",
+  "bin": {
+    "blip": "bin/blip.cjs"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TeamSillyBees/Blip.git"
+  },
+  "homepage": "https://github.com/TeamSillyBees/Blip#readme",
+  "bugs": {
+    "url": "https://github.com/TeamSillyBees/Blip/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@teamsillybees/blip-darwin-arm64": "0.2.0-dev.0",
+    "@teamsillybees/blip-darwin-x64": "0.2.0-dev.0",
+    "@teamsillybees/blip-linux-arm64": "0.2.0-dev.0",
+    "@teamsillybees/blip-linux-x64": "0.2.0-dev.0",
+    "@teamsillybees/blip-win32-arm64": "0.2.0-dev.0",
+    "@teamsillybees/blip-win32-x64": "0.2.0-dev.0"
+  }
+}

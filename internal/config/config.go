@@ -5,13 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -71,8 +67,8 @@ func read(path string, resolve bool) (Config, error) {
 		return c, fmt.Errorf("configuration must contain exactly one JSON object")
 	}
 	c.Path = absolute
-	if c.SchemaVersion != 1 {
-		return c, fmt.Errorf("configuration schema_version must be 1")
+	if err := validateStructure(c); err != nil {
+		return c, err
 	}
 	if c.PollInterval == "" {
 		c.PollInterval = "1s"
@@ -82,15 +78,6 @@ func read(path string, resolve bool) (Config, error) {
 	}
 	if c.MaxAttempts == 0 {
 		c.MaxAttempts = 5
-	}
-	if c.MaxAttempts < 1 || c.MaxAttempts > 20 {
-		return c, fmt.Errorf("max_attempts must be between 1 and 20")
-	}
-	for name, value := range map[string]string{"poll_interval": c.PollInterval, "request_timeout": c.RequestTimeout} {
-		duration, parseErr := time.ParseDuration(value)
-		if parseErr != nil || duration < 100*time.Millisecond || duration > time.Minute {
-			return c, fmt.Errorf("%s must be between 100ms and 1m", name)
-		}
 	}
 	if c.StateDir == "" {
 		c.StateDir = filepath.Join(filepath.Dir(absolute), "data")
@@ -111,66 +98,13 @@ func read(path string, resolve bool) (Config, error) {
 		}
 		*target = filepath.Clean(*target)
 	}
-	seen := map[string]bool{}
 	for i := range c.Destinations {
 		d := &c.Destinations[i]
-		if d.ID == "" || seen[d.ID] {
-			return c, fmt.Errorf("destination IDs must be nonempty and unique")
-		}
-		seen[d.ID] = true
-		switch d.Kind {
-		case "feishu", "wecom", "gotify", "webhook":
-		default:
-			return c, fmt.Errorf("unsupported destination kind for %q", d.ID)
-		}
 		if !d.Enabled || !resolve {
 			continue
 		}
-		for _, value := range []*string{&d.URL, &d.Token, &d.Secret} {
-			if err := expand(value); err != nil {
-				return c, fmt.Errorf("destination %q: %w", d.ID, err)
-			}
-		}
-		parsed, parseErr := url.Parse(d.URL)
-		if parseErr != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Fragment != "" {
-			return c, fmt.Errorf("destination %q requires an http(s) URL without userinfo or fragment", d.ID)
-		}
-		if port := parsed.Port(); port != "" {
-			number, err := strconv.Atoi(port)
-			if err != nil || number < 1 || number > 65535 {
-				return c, fmt.Errorf("destination %q has an invalid URL port", d.ID)
-			}
-		}
-		if d.Kind == "gotify" && d.Token == "" {
-			return c, fmt.Errorf("destination %q requires an application token", d.ID)
-		}
-		if d.Kind == "gotify" || d.Kind == "webhook" {
-			for _, char := range []byte(d.Token) {
-				if char <= ' ' || char == 127 {
-					return c, fmt.Errorf("destination %q token contains whitespace or control characters", d.ID)
-				}
-			}
-		}
-		headerNames := map[string]bool{}
-		for key, value := range d.Headers {
-			if d.Kind != "webhook" {
-				return c, fmt.Errorf("custom headers are only supported for webhook destinations")
-			}
-			if err := expand(&value); err != nil {
-				return c, fmt.Errorf("destination %q: %w", d.ID, err)
-			}
-			if !validHeader(key, value) {
-				return c, fmt.Errorf("destination %q contains an invalid header", d.ID)
-			}
-			canonical := http.CanonicalHeaderKey(key)
-			if headerNames[canonical] {
-				return c, fmt.Errorf("destination %q contains duplicate header names", d.ID)
-			}
-			headerNames[canonical] = true
-			d.Headers[key] = value
-		}
-		if d.Token != "" && d.Kind == "webhook" && hasAuthorization(d.Headers) {
-			return c, fmt.Errorf("destination %q must choose token or Authorization header", d.ID)
+		if err := validateDestination(d, true); err != nil {
+			return c, fmt.Errorf("destination %q: %w", d.ID, err)
 		}
 	}
 	return c, nil
@@ -192,33 +126,6 @@ func expand(value *string) error {
 		return fmt.Errorf("a referenced environment variable is not set")
 	}
 	return nil
-}
-
-func validHeader(key, value string) bool {
-	if key == "" {
-		return false
-	}
-	for _, char := range []byte(value) {
-		if char == 127 || (char < ' ' && char != '\t') {
-			return false
-		}
-	}
-	for _, char := range key {
-		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", char)) {
-			return false
-		}
-	}
-	canonical := http.CanonicalHeaderKey(key)
-	return canonical != "Host" && canonical != "Content-Length" && canonical != "Content-Type" && canonical != "Transfer-Encoding" && canonical != "X-Blip-Event-Id"
-}
-
-func hasAuthorization(headers map[string]string) bool {
-	for key := range headers {
-		if strings.EqualFold(key, "Authorization") {
-			return true
-		}
-	}
-	return false
 }
 
 func (c Config) PollDuration() time.Duration {

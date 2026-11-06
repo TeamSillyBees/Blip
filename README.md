@@ -16,14 +16,30 @@ Hook 安装按 Codex `0.163.0` 的配置协议实现；更早版本需要另行�
 
 ## 开始使用
 
-需要 Go 1.25 或更新版本构建；运行生成的程序不需要安装 Go。
+Blip 支持 npm 安装和直接运行可执行文件。npm 包提供对应平台的预编译 Go 程序，安装和使用不需要 Go 编译器；npm 启动器需要 Node.js 20 或更新版本。配置与通知队列保存在用户目录，升级 npm 包不会将它们写入包安装目录。
+
+计划发布的包名为 `@teamsillybees/blip`。**当前仓库已具备打包能力，尚未将本版本发布到 npm 注册表**；本地安装包的构建、安装与发布说明见 [npm 分发](docs/npm-distribution.md)。发布后使用：
+
+```powershell
+npm install -g @teamsillybees/blip
+blip configure
+blip install codex
+blip start
+blip test
+```
+
+直接运行单文件时，使用下面的构建方式；构建需要 Go 1.25.8 或更新版本，运行生成的程序不需要安装 Go 或 Node.js。
 
 ```powershell
 go build -o bin/blip.exe ./cmd/blip
-.\bin\blip.exe init
+.\bin\blip.exe configure
 ```
 
-配置默认保存在 `%APPDATA%\Blip\config.json`。将示例中的至少一个目的地改为 `"enabled": true`，填入 URL 与凭据，或设置它引用的环境变量。[配置示例](internal/config/example.json)中的所有目的地默认关闭。
+`configure` 是交互式配置向导（也可写作 `config` 或 `setup`），由 [Cobra](https://github.com/spf13/cobra) 管理命令、[Charm Huh](https://github.com/charmbracelet/huh) 提供终端表单。向导支持新增、编辑、启用、停用和删除渠道目的地；飞书填写 Webhook 和可选签名密钥，企业微信填写 Webhook，Gotify 填写服务地址、应用 token 和优先级，自定义 Webhook 支持 Bearer token 或静态请求头。一个渠道可配置多个目的地。
+
+密钥及可能含凭据的 URL 使用遮蔽输入，编辑时可保留现值；`${环境变量名}` 引用会原样保存。修改先保存在内存中，确认保存后一次写入配置；取消或 Ctrl+C 不保存。已有配置更新前会备份为 `config.json.bak`，若另一程序同时修改了文件，向导会拒绝覆盖并提示重新打开。保存后按提示安装 Codex hook、启动后台进程；修改运行中的配置需要 `stop`、`start` 才能生效。
+
+配置默认保存在 `%APPDATA%\Blip\config.json`。在真实终端运行向导；需要屏幕阅读器友好的文本提示时使用 `blip configure --accessible`。脚本环境可使用 `blip init` 生成示例后编辑 JSON；[配置示例](internal/config/example.json)中的所有目的地默认关闭。
 
 例如，启用飞书群机器人时，在运行 `start` 的终端设置：
 
@@ -47,7 +63,8 @@ $env:BLIP_FEISHU_SECRET = '替换为机器人签名密钥'
 ```text
 blip [--config PATH] COMMAND
 
-init                生成配置示例
+configure           交互式管理各渠道配置（别名 config / setup）
+init                生成配置示例，适合脚本或手动编辑
 install codex       安装输入与审批 hook
 uninstall codex     仅移除本配置安装的 Blip hook
 start / stop        启动后台进程 / 请求平稳停止
@@ -57,7 +74,7 @@ test                向所有启用的目的地排入一条测试通知
 version             显示版本
 ```
 
-`--config` 放在命令之前。例如：
+`--config` 可放在命令之前或之后。例如：
 
 ```powershell
 .\bin\blip.exe --config 'D:\我的工具\Blip\config.json' start
@@ -105,6 +122,7 @@ Hook 只快速入队，不在 Codex 回调中请求外部网络。每个目的�
 ```powershell
 go test ./...
 go vet ./...
+npm test
 ```
 
 测试覆盖四类渠道协议、错误响应、Unicode 字节限制、并发去重、独立收据、重试、读取位置恢复，以及真实进程的中文与空格路径、安装卸载、后台启动停止。集成测试仅使用临时 Codex home 和本地 HTTP 服务。`go test -short ./...` 可跳过进程集成测试；具备 C 编译器的环境可运行 `go test -race ./...`。

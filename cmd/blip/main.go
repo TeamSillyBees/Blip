@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -17,11 +16,13 @@ import (
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/event"
 	"github.com/TeamSillyBees/Blip/internal/platform"
+	"github.com/TeamSillyBees/Blip/internal/setup"
 	"github.com/TeamSillyBees/Blip/internal/store"
 	"github.com/TeamSillyBees/Blip/internal/worker"
+	"github.com/spf13/cobra"
 )
 
-var version = "0.1.0-dev"
+var version = "0.2.0-dev.0"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -35,53 +36,98 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	flags := flag.NewFlagSet("blip", flag.ContinueOnError)
-	flags.SetOutput(output)
-	path := flags.String("config", defaultPath, "configuration path")
-	if err = flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			help(output)
-			return nil
+	path := defaultPath
+	root := &cobra.Command{
+		Use:           "blip",
+		Short:         "Send Codex notifications to your messaging channels",
+		Long:          "Blip captures Codex completion, approval and input events locally.\nUse blip configure to set up notification channels interactively.",
+		Version:       version,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.NoArgs,
+		RunE:          func(command *cobra.Command, _ []string) error { return command.Help() },
+	}
+	root.SetIn(input)
+	root.SetOut(output)
+	root.SetErr(output)
+	root.SetArgs(args)
+	root.PersistentFlags().StringVar(&path, "config", defaultPath, "configuration path")
+	root.SetVersionTemplate("{{.Version}}\n")
+	for _, entry := range []struct{ name, description string }{
+		{"init", "Create a configuration with disabled example destinations"},
+		{"start", "Start a hidden notification worker"},
+		{"stop", "Request a graceful worker stop"},
+		{"run", "Run the notification worker in this terminal"},
+		{"status", "Show readiness and per-destination delivery results"},
+		{"test", "Queue a test notification for enabled destinations"},
+		{"hook", "Capture a Codex hook event from standard input"},
+	} {
+		root.AddCommand(&cobra.Command{
+			Use: entry.name, Short: entry.description, Args: cobra.NoArgs, Hidden: entry.name == "hook",
+			RunE: func(command *cobra.Command, _ []string) error {
+				return execute(command.Context(), path, []string{command.Name()}, command.InOrStdin(), command.OutOrStdout())
+			},
+		})
+	}
+	for _, action := range []string{"install", "uninstall"} {
+		parent := &cobra.Command{Use: action, Short: action + " agent integration", Args: cobra.NoArgs,
+			RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 		}
-		return err
+		parent.AddCommand(&cobra.Command{
+			Use: "codex", Short: action + " Blip's Codex hooks", Args: cobra.NoArgs,
+			RunE: func(command *cobra.Command, _ []string) error {
+				return execute(command.Context(), path, []string{command.Parent().Name(), "codex"}, command.InOrStdin(), command.OutOrStdout())
+			},
+		})
+		root.AddCommand(parent)
 	}
-	command := flags.Args()
-	if len(command) == 0 {
-		help(output)
-		return nil
+	var accessible bool
+	configure := &cobra.Command{
+		Use: "configure", Aliases: []string{"config", "setup"},
+		Short: "Interactively add, edit and enable notification channels",
+		Long:  "Configure Feishu, WeCom, Gotify and custom webhook destinations.\nChanges are saved together after confirmation; Ctrl+C cancels without saving.",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return setup.Run(command.Context(), path, command.InOrStdin(), command.OutOrStdout(), accessible)
+		},
 	}
-	if command[0] == "version" {
-		fmt.Fprintln(output, version)
-		return nil
-	}
-	if command[0] == "help" {
-		help(output)
-		return nil
-	}
+	configure.Flags().BoolVar(&accessible, "accessible", false, "use screen-reader-friendly terminal prompts")
+	root.AddCommand(configure)
+	root.AddCommand(&cobra.Command{Use: "version", Short: "Show the build version", Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(command.OutOrStdout(), version)
+			return err
+		},
+	})
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	return root.ExecuteContext(ctx)
+}
+
+func execute(ctx context.Context, path string, command []string, input io.Reader, output io.Writer) error {
+	var err error
 	if command[0] == "init" {
-		if _, err = os.Stat(*path); err == nil {
+		if _, err = os.Stat(path); err == nil {
 			return fmt.Errorf("configuration already exists")
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if err = store.WriteFile(*path, config.Example); err != nil {
+		if err = store.WriteFile(path, config.Example); err != nil {
 			return err
 		}
-		absolute, _ := filepath.Abs(*path)
+		absolute, _ := filepath.Abs(path)
 		fmt.Fprintln(output, "Configuration created:", absolute)
 		return nil
 	}
 	var c config.Config
 	if command[0] == "start" || command[0] == "run" {
-		c, err = config.Read(*path)
+		c, err = config.Read(path)
 	} else {
-		c, err = config.ReadLocal(*path)
+		c, err = config.ReadLocal(path)
 	}
 	if err != nil {
 		return err
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
 	switch command[0] {
 	case "hook":
 		notification, err := codex.ParseHook(input, time.Now())
@@ -230,22 +276,4 @@ func start(c config.Config, output io.Writer) error {
 		}
 	}
 	return fmt.Errorf("worker has not reported ready yet; inspect blip status and worker.log before starting again")
-}
-
-func help(output io.Writer) {
-	fmt.Fprintln(output, `Blip — Codex notifications
-
-Usage: blip [--config PATH] COMMAND
-
-  init              Create a configuration with disabled example destinations
-  install codex     Install input and approval hooks; preserve existing hooks
-  uninstall codex   Remove only this configuration's Blip hooks
-  start / stop      Start a hidden worker or request a graceful stop
-  run               Run the worker in the current terminal
-  status            Show worker and per-destination delivery counts
-  test              Queue a test notification for enabled destinations
-  version           Show the build version
-
-Set --config before COMMAND. Completion notifications require the worker;
-new hooks require review and trust in Codex.`)
 }
