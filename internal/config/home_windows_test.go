@@ -17,6 +17,12 @@ func TestCanonicalHomeDoesNotNeedDirectoryReadPermission(t *testing.T) {
 	if err := os.Mkdir(home, 0700); err != nil {
 		t.Fatal(err)
 	}
+	// Resolve aliases and Windows short names before removing read access.
+	// CI may place temporary directories beneath an 8.3 user-profile path.
+	expected, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	original, err := windows.GetNamedSecurityInfo(home, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		t.Fatal(err)
@@ -52,8 +58,8 @@ func TestCanonicalHomeDoesNotNeedDirectoryReadPermission(t *testing.T) {
 		t.Fatal("test directory still permits content reads")
 	}
 	canonical, err := CanonicalHome(home)
-	if err != nil || canonical != strings.ToLower(home) {
-		t.Fatalf("metadata-only identity failed: %q %v", canonical, err)
+	if err != nil || canonical != strings.ToLower(expected) {
+		t.Fatalf("metadata-only identity failed: got %q, want %q: %v", canonical, strings.ToLower(expected), err)
 	}
 	if _, err := os.ReadDir(home); err == nil {
 		t.Fatal("identity check changed read access")
