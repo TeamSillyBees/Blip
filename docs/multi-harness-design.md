@@ -1,6 +1,6 @@
 # Blip 多 harness 事件接入设计
 
-状态：实施中，公共来源基础、Codex v2、Claude Code 与 Hermes adapter 已落地；DSH、WorkBuddy 按下述批次推进。更新日期：2026-11-07。
+状态：公共来源基础、Codex v2、Claude Code、Hermes 与 DSH adapter 已落地；WorkBuddy 待桌面版回调验证，尚未注册 adapter。更新日期：2026-11-07。
 
 基线：`0.2.0-dev.4` 的 Codex 接入、本地持久队列和四类通知渠道。已实现来源 registry、v1/v2 配置和事件读取、逐来源状态及故障隔离、来源命令与服务权限清单，以及 Codex v2 的持久停止候选和接手序号。后续 harness 能力仍须逐项验收；当前支持情况以 [README](../README.md) 和 [兼容性记录](compatibility.md) 为准。
 
@@ -244,7 +244,7 @@ Windows 服务安装保存来源解析后的绝对位置，不使用 LocalServic
 | Codex | 保留请求 hooks＋rollout 正常结束核验，v2 评估停止和自动异常信号 | 默认来源可升级 v2；原 ID 保持，迟到完成不重复提醒；手动取消与自动异常分开处理 |
 | Claude Code | 原生程序接收 command hooks，独立安装与解析 | 对可被延续的 Stop 做有界合并；明确结束立即提醒，不明结果使用中性文案；区分审批、输入与闲置 Notification |
 | Hermes Agent | 优先评估目标版本 shell hooks，必要时使用薄 Python 插件 | 明确 shell envelope 与插件 kwargs 差异；保留 profile、session、turn 和结束结果；共享 gateway 正确关联会话 |
-| DeepSeek Harness / DSH | 先使用官方 hooks bridge，再按必要能力评估原生插件 | bridge 事件集、字段与子会话身份并非完整 Claude 协议；缺少审批事实时明确不支持；停止信号可先提供查看提醒，正常结果作为更具体证据 |
+| DeepSeek Harness / DSH | 已评估官方 bridge，因身份与结果缺口改用薄原生插件 | 观察原生 turn/end 与实际问题 waterfall，保留原生轮次及根会话身份；受控原版运行时测试通过，完整桌面会话待验 |
 | WorkBuddy | 独立 adapter，基于桌面版真实插件与回调样本实施 | 配置位置、shell、事件字段和版本分别验证；不能以 CodeBuddy CLI 文档替代桌面实测 |
 
 Hermes 的结束事件必须区分每轮 finalization、自动异常和普通进程退出，按实际含义选择结束或查看提醒。Orca 的 [Hermes 插件](https://github.com/stablyai/orca/blob/26741256dcccecac4007f64476a17825fdd3858b/src/main/hermes/hermes-managed-plugin-source.ts) 展示了共享 gateway 会话绑定处理；Blip 保留可用的结果字段，但不将完整结果字段作为及时通知的前提。

@@ -116,6 +116,13 @@ CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失
 - 真实 Python 3.14.7 / Windows shell runner 测试验证 YAML 解析、分发、stdin、空 stdout、特殊字符路径与持久入队；clarify 和 human-input context manager 生成实际请求/解除回调。结束和子任务事件使用固定源码 kwargs 通过原版分发器测试，未启动真实模型会话。
 - 回归覆盖多次重启、重复请求、并行等待、迟到已回答回调、取消与子会话身份。子会话过滤要求先收到 subagent_start；中途安装可能缺失关联。详见 [Hermes 来源](hermes.md) 与[样本](../internal/agents/testdata/hermes/README.md)。
 
+## DSH（2026-11-07，未发布）
+
+- 独立 adapter 和内容寻址的本地 Cordis 插件已接入；安装具体 profile 的 patch，保留其他插件与 YAML 表达式，按清单精准更新和卸载。
+- 原版 DSH `0.2.1-rc.2` 的 Cordis Loader / SessionStore 与真实原生进程测试通过，13 次回调覆盖输入、审批、正常结束、异常、取消、限时未答及子会话过滤；registry、结束原因和答案由测试控制，未启动真实模型。
+- 重复回放和 adapter 重启不重复通知；限时未答不解除请求，已被具体请求覆盖的停止在迟到重放后不追加完成提醒。继续执行后可开启新接手。
+- 用户尚未安装 WorkBuddy，暂不注册 adapter；不以 CodeBuddy CLI 测试代替 WorkBuddy 桌面验证。剩余样本和验收要求见 [WorkBuddy 接入门槛](workbuddy.md)。DSH 使用与限制见 [DSH 来源](dsh.md)。
+
 ## 一手资料
 
 - [Codex Hooks](https://learn.chatgpt.com/docs/hooks)：事件、信任机制、工具覆盖、默认启用与 commandWindows。

@@ -1,0 +1,13 @@
+{"blip_dsh_version":1,"event":"turn/end","session_id":"test-session","turn_id":"1","root":true,"cwd":"C:/test/project","occurred_at":"2026-11-07T00:00:00Z","reason":"completed"}
+{"blip_dsh_version":1,"event":"turn/end","session_id":"test-session","turn_id":"2","root":true,"cwd":"C:/test/project","occurred_at":"2026-11-07T00:00:00Z","reason":"error","error_code":"TEST_ERROR"}
+{"blip_dsh_version":1,"event":"turn/end","session_id":"test-session","turn_id":"3","root":true,"cwd":"C:/test/project","occurred_at":"2026-11-07T00:00:00Z","reason":"aborted","cancel_cause":"user"}
+{"blip_dsh_version":1,"event":"request","session_id":"test-session","turn_id":"4","root":true,"cwd":"C:/test/project","request_id":"input-1","kind":"input","questions":[{"text":"Choose one","options":["A","B"]}]}
+{"blip_dsh_version":1,"event":"resolved","session_id":"test-session","turn_id":"4","root":true,"cwd":"C:/test/project","request_id":"input-1"}
+{"blip_dsh_version":1,"event":"turn/end","session_id":"test-session","turn_id":"4","root":true,"cwd":"C:/test/project","occurred_at":"2026-11-07T00:00:00Z","reason":"completed"}
+{"blip_dsh_version":1,"event":"request","session_id":"test-session","turn_id":"5","root":true,"cwd":"C:/test/project","request_id":"approval-1","kind":"approval","questions":[{"text":"Allow operation?","options":["Allow","Deny"]}]}
+{"blip_dsh_version":1,"event":"resolved","session_id":"test-session","turn_id":"5","root":true,"cwd":"C:/test/project","request_id":"approval-1"}
+{"blip_dsh_version":1,"event":"turn/end","session_id":"test-session","turn_id":"5","root":true,"cwd":"C:/test/project","occurred_at":"2026-11-07T00:00:00Z","reason":"completed"}
+{"blip_dsh_version":1,"event":"request","session_id":"test-session","turn_id":"6","root":true,"cwd":"C:/test/project","request_id":"timed-1","kind":"input","questions":[{"text":"Choose one","options":["A","B"]}]}
+{"blip_dsh_version":1,"event":"turn/end","session_id":"test-session","turn_id":"6","root":true,"cwd":"C:/test/project","occurred_at":"2026-11-07T00:00:00Z","reason":"completed"}
+{"blip_dsh_version":1,"event":"turn/end","session_id":"resumed-session","turn_id":"2","root":true,"cwd":"C:/test/project","occurred_at":"2026-11-07T00:00:00Z","reason":"completed"}
+{"blip_dsh_version":1,"event":"turn/end","session_id":"test-session","turn_id":"7","root":true,"cwd":"C:/test/project","occurred_at":"2026-11-07T00:00:00Z","reason":"aborted","cancel_cause":"hook"}

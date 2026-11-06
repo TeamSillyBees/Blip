@@ -159,7 +159,7 @@ func (h handoffs) id(state *handoffState) string {
 
 func (h handoffs) finish(ctx context.Context, e event.Event, turnKey string, emit func(event.Event) error) error {
 	return h.mutate(ctx, e.SessionID, turnKey, e.TurnID, func(state *handoffState) error {
-		if state.Notified || state.Cancelled || e.OccurredAt.Before(state.LastResumeAt) {
+		if state.Notified || state.Cancelled || state.CoveredByRequest || e.OccurredAt.Before(state.LastResumeAt) {
 			return nil
 		}
 		if state.RequestKind != "" {
@@ -266,11 +266,11 @@ func (h handoffs) resume(ctx context.Context, session, turnKey, nativeTurn, iden
 			state.NotifiedKind = ""
 		}
 		state.Candidate = nil
+		if state.CoveredByRequest && (userPrompt || state.RequestKind == "") {
+			state.Sequence++
+			state.CoveredByRequest = false
+		}
 		if userPrompt {
-			if state.CoveredByRequest {
-				state.Sequence++
-				state.CoveredByRequest = false
-			}
 			state.RequestKind = ""
 			state.RequestID = ""
 			state.PendingRequests = nil

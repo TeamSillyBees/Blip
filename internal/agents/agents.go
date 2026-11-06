@@ -55,7 +55,7 @@ type Factory func(config.Config, config.Source) Adapter
 type Registry map[string]Factory
 
 func Builtins() Registry {
-	return Registry{"codex": newCodex, "claude-code": newClaude, "hermes": newHermes}
+	return Registry{"codex": newCodex, "claude-code": newClaude, "hermes": newHermes, "dsh": newDSH}
 }
 
 func (r Registry) Open(c config.Config, source config.Source) (Adapter, error) {
