@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/TeamSillyBees/Blip/internal/config"
+	"github.com/TeamSillyBees/Blip/internal/event"
 	"github.com/TeamSillyBees/Blip/internal/store"
 )
 
@@ -82,26 +83,35 @@ func Capture(ctx context.Context, c config.Config, id string, reader io.Reader) 
 	if err != nil {
 		return err
 	}
-	events, err := adapter.ParseHook(ctx, data, received)
-	if err != nil {
-		return err
-	}
 	destinations := []string{}
 	for _, d := range c.Enabled() {
 		destinations = append(destinations, d.ID)
 	}
-	for _, e := range events {
+	emit := func(e event.Event) error {
 		e.DeviceName = c.DeviceName
 		if resolver, ok := adapter.(TitleResolver); ok {
 			titleCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
 			e.SessionTitle = resolver.SessionTitle(titleCtx, e.SessionID)
 			stop()
 		}
-		if _, err = (store.Queue{Dir: c.StateDir}).Enqueue(ctx, e, destinations); err != nil {
+		if _, err := (store.Queue{Dir: c.StateDir}).Enqueue(ctx, e, destinations); err != nil {
 			return err
 		}
 		now := received
 		diagnostic.LastEventAt = &now
+		return nil
+	}
+	if consumer, ok := adapter.(HookConsumer); ok {
+		return consumer.ConsumeHook(ctx, data, received, emit)
+	}
+	events, err := adapter.ParseHook(ctx, data, received)
+	if err != nil {
+		return err
+	}
+	for _, e := range events {
+		if err = emit(e); err != nil {
+			return err
+		}
 	}
 	return nil
 }

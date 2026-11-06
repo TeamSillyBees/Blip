@@ -89,6 +89,9 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 		if interval <= 0 {
 			interval = time.Second
 		}
+		if source.EventVersion != 1 && interval > 250*time.Millisecond {
+			interval = 250 * time.Millisecond
+		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():

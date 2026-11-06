@@ -42,6 +42,10 @@ func Install(ctx context.Context, c config.Config, executable string) error {
 // InstallSource keeps legacy command text stable; new sources carry an explicit
 // ID and use the state directory selected by the adapter.
 func InstallSource(ctx context.Context, c config.Config, executable, sourceID string) error {
+	return InstallSourceVersion(ctx, c, executable, sourceID, 1)
+}
+
+func InstallSourceVersion(ctx context.Context, c config.Config, executable, sourceID string, eventVersion int) error {
 	if err := hooksEnabled(c.CodexHome); err != nil {
 		return err
 	}
@@ -56,7 +60,7 @@ func InstallSource(ctx context.Context, c config.Config, executable, sourceID st
 		command += " --source " + sourceID
 		windows += " --source " + sourceID
 	}
-	return editHooks(ctx, c, []string{command, windows}, true)
+	return editHooksVersion(ctx, c, []string{command, windows}, true, eventVersion)
 }
 
 func Uninstall(ctx context.Context, c config.Config) error { return editHooks(ctx, c, nil, false) }
@@ -82,6 +86,10 @@ func hooksEnabled(home string) error {
 }
 
 func editHooks(ctx context.Context, c config.Config, commands []string, install bool) error {
+	return editHooksVersion(ctx, c, commands, install, 1)
+}
+
+func editHooksVersion(ctx context.Context, c config.Config, commands []string, install bool, eventVersion int) error {
 	if err := os.MkdirAll(c.CodexHome, 0700); err != nil {
 		return err
 	}
@@ -144,11 +152,18 @@ func editHooks(ctx context.Context, c config.Config, commands []string, install 
 		}
 	}
 	if install {
-		for _, name := range []string{"PreToolUse", "PermissionRequest"} {
+		names := []string{"PreToolUse", "PermissionRequest"}
+		if eventVersion == 2 {
+			names = append(names, "Stop", "UserPromptSubmit", "Interrupt", "PostToolUse")
+		}
+		for _, name := range names {
 			groups, _ := hooks[name].([]any)
 			group := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": commands[0], "commandWindows": commands[1], "timeout": 10, "statusMessage": hookMarker}}}
-			if name == "PreToolUse" {
+			if name == "PreToolUse" && eventVersion != 2 {
 				group["matcher"] = `(^|[./_:])request_user_input(_async)?$`
+			}
+			if name == "Interrupt" {
+				group["hooks"].([]any)[0].(map[string]any)["timeout"] = 3
 			}
 			hooks[name] = append(groups, group)
 		}

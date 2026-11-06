@@ -27,6 +27,12 @@ type Adapter interface {
 	ParseHook(context.Context, []byte, time.Time) ([]event.Event, error)
 	Capabilities() []Capability
 }
+
+// HookConsumer coordinates adapter state with successful durable enqueue.
+// A crash before state publication can safely replay the same queue identity.
+type HookConsumer interface {
+	ConsumeHook(context.Context, []byte, time.Time, func(event.Event) error) error
+}
 type Collector interface {
 	Poll(context.Context, func(event.Event) error) error
 }

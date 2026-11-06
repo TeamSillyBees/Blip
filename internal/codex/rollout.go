@@ -85,6 +85,53 @@ type Collector struct {
 	StatePath   string
 	state       checkpoint
 	loaded      bool
+	Observe     func(context.Context, Lifecycle) error
+}
+
+// Lifecycle exposes only root-turn facts used by the v2 adapter. The legacy
+// collector retains its original completion IDs and checkpoint representation.
+type Lifecycle struct {
+	Type       string
+	SessionID  string
+	TurnID     string
+	OccurredAt time.Time
+	CWD        string
+}
+
+func lifecycle(line record, position *cursor) *Lifecycle {
+	if line.Type != "event_msg" || line.Timestamp.IsZero() || !position.Metadata.IsRoot() {
+		return nil
+	}
+	var payload struct {
+		Type       string          `json:"type"`
+		TurnID     string          `json:"turn_id"`
+		RootTurnID string          `json:"root_turn_id"`
+		Status     string          `json:"status"`
+		Error      json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(line.Payload, &payload) != nil || payload.TurnID == "" || (payload.RootTurnID != "" && payload.RootTurnID != payload.TurnID) {
+		return nil
+	}
+	kind := payload.Type
+	switch kind {
+	case "task_started", "turn_started", "turn_aborted", "turn_failed", "task_failed":
+	case "task_complete":
+		switch payload.Status {
+		case "cancelled", "canceled", "interrupted", "aborted":
+			kind = "turn_aborted"
+		case "failed", "error":
+			kind = "turn_failed"
+		default:
+			if len(payload.Error) > 0 && string(payload.Error) != "null" {
+				kind = "turn_failed"
+			} else {
+				return nil
+			}
+		}
+	default:
+		return nil
+	}
+	return &Lifecycle{Type: kind, SessionID: position.Metadata.ID, TurnID: payload.TurnID, OccurredAt: line.Timestamp.UTC(), CWD: position.Metadata.CWD}
 }
 
 func readMetadata(path string) (Metadata, error) {
@@ -329,6 +376,13 @@ func (c *Collector) read(ctx context.Context, file *os.File, position *cursor, e
 				var metadata Metadata
 				if json.Unmarshal(line.Payload, &metadata) == nil {
 					position.Metadata = metadata
+				}
+			}
+			if c.Observe != nil && line.Timestamp.After(c.state.BaselineAt) {
+				if signal := lifecycle(line, position); signal != nil {
+					if err = c.Observe(ctx, *signal); err != nil {
+						return err
+					}
 				}
 			}
 			notification := completeEvent(line, position)

@@ -25,6 +25,8 @@ type Hook struct {
 	ToolName       string          `json:"tool_name"`
 	ToolUseID      string          `json:"tool_use_id"`
 	Input          json.RawMessage `json:"tool_input"`
+	Prompt         string          `json:"prompt"`
+	AgentID        string          `json:"agent_id"`
 }
 
 var inputTool = regexp.MustCompile(`(^|[./_:])request_user_input(_async)?$`)
@@ -53,7 +55,7 @@ func ParseHook(reader io.Reader, now time.Time) (*event.Event, error) {
 	if hook.SessionID == "" || hook.TurnID == "" {
 		return nil, fmt.Errorf("hook is missing session_id or turn_id")
 	}
-	if IsSubagentTranscript(hook.TranscriptPath) {
+	if hook.AgentID != "" || IsSubagentTranscript(hook.TranscriptPath) {
 		return nil, nil
 	}
 	input := map[string]any{}

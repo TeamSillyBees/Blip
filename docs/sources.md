@@ -53,7 +53,7 @@ blip sources remove --source codex-work
 
 与原设备、队列、超时和渠道字段组合使用；示例目的地为空，需配置后才会实际发送。v2 不再使用顶层 `codex_home`。`sources: []` 表示不采集任何来源，已入队通知仍可投递。
 
-默认 Codex 可显式升级：`blip sources event-version 2 --source codex-default`。这会影响新 webhook 事件；已入队记录保持原版本。旧正常结束和请求 ID 仍保留，升级后的重复回调不会覆盖原通知或重置收据。v2 的额外事件由 adapter 实际能力决定，支持情况见 `doctor`。
+默认 Codex 可显式升级：`blip sources event-version 2 --source codex-default`，随后重新执行 `blip install codex` 并在 Codex 中审阅新增的 hooks。这会影响新 webhook 事件；已入队记录保持原版本。旧正常结束和请求 ID 仍保留，升级后的重复回调不会覆盖原通知或重置收据。Codex v2 收到 Stop 后，worker 做最多 1 秒的有界合并；没有正常结果时发出 `attention_required/stop_signal`。已明确取消或已有对应输入请求时不追加泛化提醒，停止后明确继续执行则允许之后再次提醒。支持与验证边界见 `doctor` 和兼容性记录。
 
 ## 诊断和回退
 

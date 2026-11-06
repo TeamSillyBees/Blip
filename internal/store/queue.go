@@ -39,6 +39,37 @@ func (q Queue) jobPath(id string) string { return filepath.Join(q.Dir, "jobs", i
 
 var ErrQuarantined = errors.New("notification record is quarantined; inspect the preserved record before recovery")
 
+// Snapshot reads the first durable notification under the same lock used by
+// enqueue. Adapters use it after replay/upgrade to retain the original outcome.
+func (q Queue) Snapshot(ctx context.Context, id string) (*event.Event, error) {
+	if !validID(id) {
+		return nil, fmt.Errorf("invalid notification ID")
+	}
+	lock, err := q.mutationLock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Unlock()
+	if blocked, err := q.blocked(id); blocked || err != nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, ErrQuarantined
+	}
+	data, err := os.ReadFile(q.jobPath(id))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var job Job
+	if decodeJob(data, id+".json", &job) != nil {
+		return nil, ErrQuarantined
+	}
+	return &job.Event, nil
+}
+
 func (q Queue) mutationLock(ctx context.Context) (*flock.Flock, error) {
 	if err := os.MkdirAll(q.Dir, 0700); err != nil {
 		return nil, err
