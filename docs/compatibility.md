@@ -109,6 +109,13 @@ CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失
 - Stop 按 signal-only 提醒；StopFailure、AskUserQuestion、Elicitation、PermissionRequest 采用官方协议样本验证，尚未将这些交互分支标为客户端实测。没有调用真实模型或外部通知渠道。
 - 身份优先使用 prompt_id 与原生 request ID；旧 payload 的持久序号和内容合并是尽力去重。未读取 transcript，不新增 Windows 服务读取 Claude home 的权限。使用方法与局限见 [Claude Code 来源](claude-code.md)。
 
+## Hermes（2026-11-07，未发布）
+
+- 根据本机固定源码 `4d043038` 接入 profile 的 config.yaml shell hooks。YAML 节点编辑保留注释与其他配置，清单按来源保存，不自动修改 consent allowlist。
+- 读取真实 shell envelope 的 extra 字段；区分完成、自动异常、中断与普通进程退出。采用实际 on_human_input_request，不将可能自动处理的 pre_approval_request 当作人工等待。
+- 真实 Python 3.14.7 / Windows shell runner 测试验证 YAML 解析、分发、stdin、空 stdout、特殊字符路径与持久入队；clarify 和 human-input context manager 生成实际请求/解除回调。结束和子任务事件使用固定源码 kwargs 通过原版分发器测试，未启动真实模型会话。
+- 回归覆盖多次重启、重复请求、并行等待、迟到已回答回调、取消与子会话身份。子会话过滤要求先收到 subagent_start；中途安装可能缺失关联。详见 [Hermes 来源](hermes.md) 与[样本](../internal/agents/testdata/hermes/README.md)。
+
 ## 一手资料
 
 - [Codex Hooks](https://learn.chatgpt.com/docs/hooks)：事件、信任机制、工具覆盖、默认启用与 commandWindows。

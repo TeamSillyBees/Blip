@@ -101,7 +101,7 @@ version             显示版本
 
 ## 多来源配置
 
-当前源码已支持多个独立 Codex home 和 [Claude Code](docs/claude-code.md)，使用内置 harness 适配层。旧配置无需修改；需要新增来源时使用：
+当前源码已支持多个独立 Codex home、[Claude Code](docs/claude-code.md) 和 [Hermes](docs/hermes.md)，使用内置 harness 适配层。旧配置无需修改；需要新增来源时使用：
 
 ```powershell
 blip sources add --source codex-work --harness codex --home 'D:\Agent Homes\codex-work'

@@ -30,22 +30,25 @@ type stopCandidate struct {
 	CWD        string    `json:"cwd,omitempty"`
 }
 type handoffState struct {
-	Format           int             `json:"format"`
-	Revision         uint64          `json:"revision"`
-	SessionID        string          `json:"session_id"`
-	TurnKey          string          `json:"turn_key"`
-	NativeTurnID     string          `json:"native_turn_id,omitempty"`
-	Sequence         uint64          `json:"sequence"`
-	Notified         bool            `json:"notified"`
-	NotifiedKind     event.Kind      `json:"notified_kind,omitempty"`
-	Cancelled        bool            `json:"cancelled"`
-	RequestKind      event.Kind      `json:"request_kind,omitempty"`
-	RequestID        string          `json:"request_id,omitempty"`
-	Resumes          map[string]bool `json:"resumes,omitempty"`
-	Candidate        *stopCandidate  `json:"candidate,omitempty"`
-	LastSignalAt     time.Time       `json:"last_signal_at,omitempty"`
-	LastResumeAt     time.Time       `json:"last_resume_at,omitempty"`
-	CoveredByRequest bool            `json:"covered_by_request,omitempty"`
+	Format           int                   `json:"format"`
+	Revision         uint64                `json:"revision"`
+	SessionID        string                `json:"session_id"`
+	TurnKey          string                `json:"turn_key"`
+	NativeTurnID     string                `json:"native_turn_id,omitempty"`
+	Sequence         uint64                `json:"sequence"`
+	Notified         bool                  `json:"notified"`
+	NotifiedKind     event.Kind            `json:"notified_kind,omitempty"`
+	Cancelled        bool                  `json:"cancelled"`
+	RequestKind      event.Kind            `json:"request_kind,omitempty"`
+	RequestID        string                `json:"request_id,omitempty"`
+	Requests         map[string]bool       `json:"requests,omitempty"`
+	ResolvedRequests map[string]bool       `json:"resolved_requests,omitempty"`
+	PendingRequests  map[string]event.Kind `json:"pending_requests,omitempty"`
+	Resumes          map[string]bool       `json:"resumes,omitempty"`
+	Candidate        *stopCandidate        `json:"candidate,omitempty"`
+	LastSignalAt     time.Time             `json:"last_signal_at,omitempty"`
+	LastResumeAt     time.Time             `json:"last_resume_at,omitempty"`
+	CoveredByRequest bool                  `json:"covered_by_request,omitempty"`
 }
 
 func (h handoffs) key(session, turn string) string {
@@ -199,11 +202,29 @@ func (h handoffs) request(ctx context.Context, e event.Event, turnKey string, em
 		if state.Cancelled {
 			return nil
 		}
+		identity := e.RequestID
+		if identity == "" {
+			identity = "event:" + e.ID
+		}
+		if state.Requests[identity] || state.ResolvedRequests[identity] {
+			return nil
+		}
 		if err := emit(e); err != nil {
 			return err
 		}
+		if state.Requests == nil {
+			state.Requests = map[string]bool{}
+		}
+		state.Requests[identity] = true
+		if state.PendingRequests == nil {
+			state.PendingRequests = map[string]event.Kind{}
+			if state.RequestKind != "" {
+				state.PendingRequests[state.RequestID] = state.RequestKind
+			}
+		}
+		state.PendingRequests[identity] = e.Kind
 		state.RequestKind = e.Kind
-		state.RequestID = e.RequestID
+		state.RequestID = identity
 		state.LastSignalAt = e.OccurredAt
 		state.Candidate = nil
 		return nil
@@ -252,6 +273,7 @@ func (h handoffs) resume(ctx context.Context, session, turnKey, nativeTurn, iden
 			}
 			state.RequestKind = ""
 			state.RequestID = ""
+			state.PendingRequests = nil
 			state.Cancelled = false
 		}
 		return nil
@@ -267,9 +289,25 @@ func (h handoffs) resolveRequest(ctx context.Context, session, turnKey, nativeTu
 		return nil
 	}
 	return h.mutate(ctx, session, turnKey, nativeTurn, func(state *handoffState) error {
+		if state.ResolvedRequests == nil {
+			state.ResolvedRequests = map[string]bool{}
+		}
+		kind := state.PendingRequests[requestID]
+		if kind == "" && state.RequestID == requestID {
+			kind = state.RequestKind
+		}
+		if kind != event.ApprovalRequested && !includeInput {
+			return nil
+		}
+		state.ResolvedRequests[requestID] = true
+		delete(state.PendingRequests, requestID)
 		if (state.RequestKind == event.ApprovalRequested || (includeInput && state.RequestKind == event.InputRequested)) && state.RequestID == requestID {
 			state.RequestKind = ""
 			state.RequestID = ""
+			for id, pendingKind := range state.PendingRequests {
+				state.RequestKind, state.RequestID = pendingKind, id
+				break
+			}
 		}
 		return nil
 	})

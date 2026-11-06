@@ -72,6 +72,44 @@ func TestStopDeadlineSurvivesDuplicateAndRestart(t *testing.T) {
 	}
 }
 
+func TestParallelRequestsAndLateReplayStayResolved(t *testing.T) {
+	h, emit := testLedger(t)
+	ctx, now := context.Background(), time.Now()
+	makeRequest := func(id string) event.Event {
+		e := completed(h, now)
+		e.Kind = event.InputRequested
+		e.RequestID = id
+		e.ID = event.SourceEventID(h.source.ID, h.source.Harness, "request", id)
+		return e
+	}
+	for _, id := range []string{"q1", "q2"} {
+		if err := h.request(ctx, makeRequest(id), "t", emit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.resolveRequest(ctx, "s", "t", "t", "q2", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.finish(ctx, completed(h, now.Add(time.Second)), "t", emit); err != nil {
+		t.Fatal(err)
+	}
+	if len(ledgerEvents(t, h)) != 2 {
+		t.Fatal("one resolved request cleared another outstanding wait")
+	}
+	if err := h.resolveRequest(ctx, "s", "t", "t", "q1", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.request(ctx, makeRequest("q1"), "t", emit); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.finish(ctx, completed(h, now.Add(2*time.Second)), "t", emit); err != nil {
+		t.Fatal(err)
+	}
+	if len(ledgerEvents(t, h)) != 3 {
+		t.Fatal("replayed answered request hid completion")
+	}
+}
+
 func TestExplicitResumeOpensOneNewHandoff(t *testing.T) {
 	h, emit := testLedger(t)
 	ctx := context.Background()

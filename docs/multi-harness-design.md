@@ -1,6 +1,6 @@
 # Blip 多 harness 事件接入设计
 
-状态：实施中，公共来源基础、Codex v2 和 Claude Code adapter 已落地；Hermes、DSH、WorkBuddy 按下述批次推进。日期：2026-11-06。
+状态：实施中，公共来源基础、Codex v2、Claude Code 与 Hermes adapter 已落地；DSH、WorkBuddy 按下述批次推进。更新日期：2026-11-07。
 
 基线：`0.2.0-dev.4` 的 Codex 接入、本地持久队列和四类通知渠道。已实现来源 registry、v1/v2 配置和事件读取、逐来源状态及故障隔离、来源命令与服务权限清单，以及 Codex v2 的持久停止候选和接手序号。后续 harness 能力仍须逐项验收；当前支持情况以 [README](../README.md) 和 [兼容性记录](compatibility.md) 为准。
 
