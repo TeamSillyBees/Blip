@@ -37,6 +37,9 @@ func ValidateDeviceName(name string) error {
 
 // Clone returns independent settings suitable for staging an edit.
 func (c Config) Clone() Config {
+	if c.Sources != nil {
+		c.Sources = append([]Source{}, c.Sources...)
+	}
 	if c.Destinations != nil {
 		destinations := make([]Destination, len(c.Destinations))
 		for i, d := range c.Destinations {
@@ -59,8 +62,11 @@ func cloneDestination(d Destination) Destination {
 }
 
 func validateStructure(c Config) error {
-	if c.SchemaVersion != 1 {
-		return fmt.Errorf("configuration schema_version must be 1")
+	if c.SchemaVersion != 1 && c.SchemaVersion != 2 {
+		return fmt.Errorf("configuration schema_version must be 1 or 2")
+	}
+	if err := validateSources(c); err != nil {
+		return err
 	}
 	if c.DeviceName != "" {
 		if err := ValidateDeviceName(c.DeviceName); err != nil {

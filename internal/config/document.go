@@ -202,7 +202,7 @@ func decodeDocument(data []byte, c *Config) error {
 	}
 	for name := range fields {
 		switch name {
-		case "schema_version", "device_name", "state_dir", "codex_home", "poll_interval", "request_timeout", "max_attempts", "destinations":
+		case "schema_version", "device_name", "state_dir", "codex_home", "sources", "poll_interval", "request_timeout", "max_attempts", "destinations":
 		default:
 			return fmt.Errorf("unknown configuration field")
 		}
@@ -286,6 +286,9 @@ func (d *Document) encode() ([]byte, error) {
 			fields[name] = value
 		}
 	}
+	if d.Config.SchemaVersion == 2 {
+		delete(fields, "codex_home")
+	}
 	if !d.existed || !reflect.DeepEqual(d.Config.Destinations, d.initial.Destinations) {
 		var oldObjects []map[string]json.RawMessage
 		if raw, ok := fields["destinations"]; ok {
@@ -333,6 +336,7 @@ func configFields(c Config) (map[string]json.RawMessage, error) {
 		"schema_version": c.SchemaVersion, "device_name": c.DeviceName, "state_dir": c.StateDir,
 		"codex_home": c.CodexHome, "poll_interval": c.PollInterval,
 		"request_timeout": c.RequestTimeout, "max_attempts": c.MaxAttempts,
+		"sources": c.Sources,
 	})
 }
 

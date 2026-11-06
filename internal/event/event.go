@@ -4,7 +4,9 @@ package event
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,6 +18,7 @@ const (
 	TurnCompleted     Kind = "turn_completed"
 	ApprovalRequested Kind = "approval_requested"
 	InputRequested    Kind = "input_requested"
+	AttentionRequired Kind = "attention_required"
 )
 
 type Question struct {
@@ -28,13 +31,15 @@ type Event struct {
 	SchemaVersion int        `json:"schema_version"`
 	ID            string     `json:"id"`
 	Agent         string     `json:"agent"`
+	SourceID      string     `json:"source_id,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
 	DeviceName    string     `json:"device_name,omitempty"`
 	Kind          Kind       `json:"kind"`
 	Source        string     `json:"source"`
 	OccurredAt    time.Time  `json:"occurred_at"`
 	SessionID     string     `json:"session_id"`
 	SessionTitle  string     `json:"session_title,omitempty"`
-	TurnID        string     `json:"turn_id"`
+	TurnID        string     `json:"turn_id,omitempty"`
 	RequestID     string     `json:"request_id,omitempty"`
 	Project       string     `json:"project"`
 	CWD           string     `json:"cwd,omitempty"`
@@ -44,6 +49,15 @@ type Event struct {
 
 func ID(parts ...string) string {
 	hash := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(hash[:])
+}
+
+// SourceEventID uses an unambiguous, versioned encoding. opportunity is the
+// adapter's stable handoff/request identity, not the final notification kind.
+func SourceEventID(sourceID, harness, opportunity string, identity ...string) string {
+	parts := append([]string{"blip-event-v2", sourceID, harness, opportunity}, identity...)
+	data, _ := json.Marshal(parts)
+	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
 }
 
@@ -59,17 +73,56 @@ func Project(cwd string) string {
 }
 
 func (e Event) Validate() error {
-	if e.SchemaVersion != 1 || e.Agent != "codex" || len(e.ID) != 64 || e.SessionID == "" || e.TurnID == "" || e.OccurredAt.IsZero() {
+	if len(e.ID) != 64 || e.SessionID == "" || e.OccurredAt.IsZero() {
 		return fmt.Errorf("invalid notification identity")
+	}
+	switch e.SchemaVersion {
+	case 1:
+		if e.Agent != "codex" || e.TurnID == "" || e.SourceID != "" || e.Reason != "" {
+			return fmt.Errorf("invalid v1 notification identity")
+		}
+	case 2:
+		if !identifier.MatchString(e.Agent) || !identifier.MatchString(e.SourceID) || e.Source == "" {
+			return fmt.Errorf("invalid v2 notification identity")
+		}
+	default:
+		return fmt.Errorf("unsupported notification schema_version")
 	}
 	if _, err := hex.DecodeString(e.ID); err != nil {
 		return fmt.Errorf("invalid notification ID")
 	}
 	switch e.Kind {
 	case TurnCompleted, ApprovalRequested, InputRequested:
+		if e.Reason != "" {
+			return fmt.Errorf("reason is only valid for attention_required")
+		}
 		return nil
+	case AttentionRequired:
+		if e.SchemaVersion == 2 && (e.Reason == "stopped" || e.Reason == "error" || e.Reason == "stop_signal") {
+			return nil
+		}
+		return fmt.Errorf("invalid attention reason or schema_version")
 	default:
 		return fmt.Errorf("unsupported notification kind")
+	}
+}
+
+var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+func (e Event) AgentName() string {
+	switch e.Agent {
+	case "", "codex":
+		return "Codex"
+	case "claude-code":
+		return "Claude Code"
+	case "hermes":
+		return "Hermes"
+	case "dsh":
+		return "DSH"
+	case "workbuddy":
+		return "WorkBuddy"
+	default:
+		return e.Agent
 	}
 }
 
@@ -91,6 +144,15 @@ func LimitBytes(s string, limit int) string {
 
 func (e Event) Title() string {
 	label := map[Kind]string{TurnCompleted: "完成", ApprovalRequested: "需要输入", InputRequested: "需要输入"}[e.Kind]
+	if e.SchemaVersion == 2 {
+		label = map[Kind]string{TurnCompleted: "本轮已结束", ApprovalRequested: "需要确认", InputRequested: "需要回复", AttentionRequired: "已停下，请查看"}[e.Kind]
+		if e.Kind == AttentionRequired && e.Reason == "error" {
+			label = "运行遇到问题"
+		}
+		if e.Kind == AttentionRequired && e.Reason == "stop_signal" {
+			label = "收到停止信号，请查看"
+		}
+	}
 	title := label + " · " + LimitBytes(e.Project, 120)
 	if e.DeviceName != "" {
 		title += " · " + LimitBytes(e.DeviceName, 128)
@@ -111,7 +173,14 @@ func (e Event) Body() string {
 		text.WriteString("\n时间：" + e.OccurredAt.Local().Format("2006-01-02 15:04:05 -07:00"))
 	}
 	switch e.Kind {
+	case TurnCompleted:
+		if e.SchemaVersion == 2 {
+			text.WriteString("\n\n本轮已结束，可以查看结果、继续当前工作或安排下一步。")
+		}
 	case InputRequested:
+		if e.SchemaVersion == 2 {
+			text.WriteString("\n\n请回到 " + e.AgentName() + " 回复。")
+		}
 		for _, question := range e.Questions {
 			text.WriteString("\n\n" + question.Text)
 			for index, option := range question.Options {
@@ -119,7 +188,15 @@ func (e Event) Body() string {
 			}
 		}
 	case ApprovalRequested:
-		text.WriteString("\n\n请在 Codex 中确认审批。")
+		text.WriteString("\n\n请在 " + e.AgentName() + " 中确认审批。")
+		if e.SchemaVersion == 2 && e.Detail != "" {
+			text.WriteString("\n" + LimitBytes(e.Detail, 1500))
+		}
+	case AttentionRequired:
+		text.WriteString("\n\n请回到 " + e.AgentName() + " 查看并决定下一步。")
+		if e.Detail != "" {
+			text.WriteString("\n" + LimitBytes(e.Detail, 1500))
+		}
 	}
 	return text.String()
 }

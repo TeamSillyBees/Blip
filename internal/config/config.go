@@ -26,6 +26,7 @@ type Config struct {
 	DeviceName     string        `json:"device_name,omitempty"`
 	StateDir       string        `json:"state_dir,omitempty"`
 	CodexHome      string        `json:"codex_home,omitempty"`
+	Sources        []Source      `json:"sources,omitempty"`
 	PollInterval   string        `json:"poll_interval,omitempty"`
 	RequestTimeout string        `json:"request_timeout,omitempty"`
 	MaxAttempts    int           `json:"max_attempts,omitempty"`
@@ -110,13 +111,13 @@ func read(path string, validateChannels bool, defaults RuntimeDefaults) (Config,
 	if c.StateDir == "" {
 		c.StateDir = filepath.Join(filepath.Dir(absolute), "data")
 	}
-	if c.CodexHome == "" {
+	if c.SchemaVersion == 1 && c.CodexHome == "" {
 		c.CodexHome = defaults.CodexHome
 	}
-	if c.CodexHome == "" {
+	if c.SchemaVersion == 1 && c.CodexHome == "" {
 		c.CodexHome = os.Getenv("CODEX_HOME")
 	}
-	if c.CodexHome == "" {
+	if c.SchemaVersion == 1 && c.CodexHome == "" {
 		home, homeErr := os.UserHomeDir()
 		if homeErr != nil {
 			return c, homeErr
@@ -124,10 +125,19 @@ func read(path string, validateChannels bool, defaults RuntimeDefaults) (Config,
 		c.CodexHome = filepath.Join(home, ".codex")
 	}
 	for _, target := range []*string{&c.StateDir, &c.CodexHome} {
+		if *target == "" {
+			continue
+		}
 		if !filepath.IsAbs(*target) {
 			*target = filepath.Join(filepath.Dir(absolute), *target)
 		}
 		*target = filepath.Clean(*target)
+	}
+	for i := range c.Sources {
+		if c.Sources[i].EventVersion == 0 {
+			c.Sources[i].EventVersion = 2
+		}
+		c.Sources[i].Home = absoluteHome(absolute, c.Sources[i].Home)
 	}
 	for i := range c.Destinations {
 		d := &c.Destinations[i]
