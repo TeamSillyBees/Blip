@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/TeamSillyBees/Blip/internal/config"
 )
 
 func TestCommandHelpAndVersionDoNotRequireConfiguration(t *testing.T) {
@@ -37,6 +39,13 @@ func TestConfigFlagBeforeAndAfterCommand(t *testing.T) {
 		}
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("config flag was ignored: %v", err)
+		}
+		document, err := config.OpenDocument(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if document.Config.DeviceName != config.DefaultDeviceName() {
+			t.Fatalf("init did not save the default device name: %q", document.Config.DeviceName)
 		}
 	}
 }

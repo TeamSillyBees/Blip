@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.2.0-dev.0"
+var version = "0.2.0-dev.1"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -112,7 +112,11 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if err = store.WriteFile(path, config.Example); err != nil {
+		data, err := config.ExampleBytes()
+		if err != nil {
+			return err
+		}
+		if err = store.WriteFile(path, data); err != nil {
 			return err
 		}
 		absolute, _ := filepath.Abs(path)
@@ -134,6 +138,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		if err != nil || notification == nil {
 			return err
 		}
+		notification.DeviceName = c.DeviceName
 		hookCtx, stop := context.WithTimeout(ctx, 3*time.Second)
 		defer stop()
 		_, err = (store.Queue{Dir: c.StateDir}).Enqueue(hookCtx, *notification, worker.DestinationIDs(c))
@@ -192,7 +197,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		return printStatus(c, output)
 	case "test":
 		now := time.Now().UTC()
-		notification := event.Event{SchemaVersion: 1, ID: event.ID("test", now.Format(time.RFC3339Nano)), Agent: "codex", Kind: event.TurnCompleted, Source: "blip/test", OccurredAt: now, SessionID: "blip-test", TurnID: now.Format("20060102T150405.000000000"), Project: "Blip", Detail: "这是一条 Blip 测试通知。"}
+		notification := event.Event{SchemaVersion: 1, ID: event.ID("test", now.Format(time.RFC3339Nano)), Agent: "codex", Kind: event.TurnCompleted, Source: "blip/test", OccurredAt: now, SessionID: "blip-test", TurnID: now.Format("20060102T150405.000000000"), Project: "Blip", DeviceName: c.DeviceName, Detail: "这是一条 Blip 测试通知。"}
 		added, err := (store.Queue{Dir: c.StateDir}).Enqueue(ctx, notification, worker.DestinationIDs(c))
 		if err != nil {
 			return err

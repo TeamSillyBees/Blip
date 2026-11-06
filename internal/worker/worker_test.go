@@ -22,6 +22,59 @@ type fakeSender struct {
 	calls map[string]int
 }
 
+type recordingSender struct {
+	notifications []event.Event
+}
+
+func (s *recordingSender) Send(_ context.Context, _ config.Destination, notification event.Event) error {
+	s.notifications = append(s.notifications, notification)
+	if len(s.notifications) == 1 {
+		return &channels.SendError{Message: "HTTP 503", Retryable: true}
+	}
+	return nil
+}
+
+func TestDeviceNamesSurviveQueuedRetriesAndLegacyRecords(t *testing.T) {
+	for _, entry := range []struct {
+		name, stored, configured, expected string
+	}{
+		{"captured name", "原始工作站", "重命名后的工作站", "原始工作站"},
+		{"legacy record", "", "配置中的设备", "配置中的设备"},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			ctx := context.Background()
+			q := store.Queue{Dir: t.TempDir()}
+			now := time.Now().UTC()
+			notification := event.Event{SchemaVersion: 1, ID: event.ID(entry.name), Agent: "codex", DeviceName: entry.stored, Kind: event.TurnCompleted, OccurredAt: now, SessionID: "session", TurnID: "turn"}
+			if _, err := q.Enqueue(ctx, notification, []string{"destination"}); err != nil {
+				t.Fatal(err)
+			}
+			sender := &recordingSender{}
+			dispatcher := Dispatcher{Queue: q, Sender: sender, DeviceName: entry.configured, MaxAttempts: 2, Timeout: time.Second}
+			for _, due := range []time.Time{now.Add(time.Second), now.Add(time.Minute)} {
+				if sent, err := dispatcher.DeliverOnce(ctx, config.Destination{ID: "destination"}, due); !sent || err != nil {
+					t.Fatalf("send failed: sent=%v, error=%v", sent, err)
+				}
+			}
+			if len(sender.notifications) != 2 {
+				t.Fatalf("wrong retry count: %d", len(sender.notifications))
+			}
+			for _, delivered := range sender.notifications {
+				if delivered.DeviceName != entry.expected || delivered.ID != notification.ID {
+					t.Fatalf("device name or identity changed: %+v", delivered)
+				}
+			}
+			jobs, err := q.Load()
+			if err != nil || len(jobs) != 1 {
+				t.Fatalf("load persisted job: %v", err)
+			}
+			if jobs[0].Event.DeviceName != entry.stored || jobs[0].Deliveries[0].DeliveredAt == nil {
+				t.Fatal("delivery rewrote captured metadata or failed to record successful retry")
+			}
+		})
+	}
+}
+
 func TestStopInterruptsLongPollAndPreservesInflightJob(t *testing.T) {
 	for _, inflight := range []bool{false, true} {
 		t.Run(map[bool]string{false: "idle", true: "sending"}[inflight], func(t *testing.T) {

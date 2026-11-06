@@ -57,16 +57,15 @@ func TestDocumentCancelAndUnchangedSavePreserveOriginalBytes(t *testing.T) {
 	assertMissing(t, path+".bak")
 }
 
-func TestDocumentPreservesReferencesPathsAndOmittedDefaults(t *testing.T) {
+func TestDocumentPreservesLiteralValuesPathsAndOmittedDefaults(t *testing.T) {
 	t.Setenv("BLIP_EDITOR_TOKEN", "do-not-serialize-this-secret")
-	t.Setenv("BLIP_EDITOR_URL", "https://example.invalid/")
 	path, original := writeDocument(t, `{
   "schema_version":1,
   "state_dir":"relative/data",
   "codex_home":"../codex",
   "max_attempts":0,
   "destinations":[
-    {"id":"existing","kind":"gotify","enabled":true,"url":"${BLIP_EDITOR_URL}","token":"${BLIP_EDITOR_TOKEN}"},
+    {"id":"existing","kind":"gotify","enabled":true,"url":"https://example.invalid/","token":"literal$BLIP_EDITOR_TOKEN"},
     {"id":"sample","kind":"webhook","enabled":false}
   ]
 }`)
@@ -78,7 +77,7 @@ func TestDocumentPreservesReferencesPathsAndOmittedDefaults(t *testing.T) {
 		t.Fatal("editing resolved paths or applied defaults")
 	}
 	doc.Config.Destinations[0].Priority = 4
-	doc.Config.Destinations = append(doc.Config.Destinations, Destination{ID: "new", Kind: "webhook", Enabled: true, URL: "${BLIP_EDITOR_URL}", Headers: map[string]string{"X-Token": "${BLIP_EDITOR_TOKEN}"}})
+	doc.Config.Destinations = append(doc.Config.Destinations, Destination{ID: "new", Kind: "webhook", Enabled: true, URL: "https://example.invalid/", Headers: map[string]string{"X-Token": "literal$BLIP_EDITOR_TOKEN"}})
 	if err := doc.Save(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +99,8 @@ func TestDocumentPreservesReferencesPathsAndOmittedDefaults(t *testing.T) {
 		t.Fatal("untouched disabled destination gained omitted fields")
 	}
 	data, _ := os.ReadFile(path)
-	if bytes.Contains(data, []byte("do-not-serialize-this-secret")) || !bytes.Contains(data, []byte("${BLIP_EDITOR_TOKEN}")) {
-		t.Fatal("save expanded a credential reference")
+	if bytes.Contains(data, []byte("do-not-serialize-this-secret")) || !bytes.Contains(data, []byte("literal$BLIP_EDITOR_TOKEN")) {
+		t.Fatal("save changed a literal credential")
 	}
 	if err := doc.Save(context.Background()); err != nil {
 		t.Fatal(err)
@@ -114,14 +113,14 @@ func TestDocumentPreservesReferencesPathsAndOmittedDefaults(t *testing.T) {
 }
 
 func TestDocumentPreservesHeaderEditsWithoutAliasingSnapshot(t *testing.T) {
-	path, original := writeDocument(t, `{"schema_version":1,"destinations":[{"id":"web","kind":"webhook","enabled":true,"url":"https://example.invalid","headers":{"X-Key":"${OLD_KEY}"}}]}`)
+	path, original := writeDocument(t, `{"schema_version":1,"destinations":[{"id":"web","kind":"webhook","enabled":true,"url":"https://example.invalid","headers":{"X-Key":"old-key"}}]}`)
 	doc, err := OpenDocument(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	clone := doc.Config.Clone()
-	clone.Destinations[0].Headers["X-Key"] = "${NEW_KEY}"
-	if doc.Config.Destinations[0].Headers["X-Key"] != "${OLD_KEY}" {
+	clone.Destinations[0].Headers["X-Key"] = "new-key"
+	if doc.Config.Destinations[0].Headers["X-Key"] != "old-key" {
 		t.Fatal("staged clone mutated the document")
 	}
 	doc.Config = clone
@@ -130,8 +129,40 @@ func TestDocumentPreservesHeaderEditsWithoutAliasingSnapshot(t *testing.T) {
 	}
 	assertBytes(t, path+".bak", original)
 	reopened, err := OpenDocument(path)
-	if err != nil || reopened.Config.Destinations[0].Headers["X-Key"] != "${NEW_KEY}" {
+	if err != nil || reopened.Config.Destinations[0].Headers["X-Key"] != "new-key" {
 		t.Fatalf("header edit did not persist: %v", err)
+	}
+}
+
+func TestDocumentDeviceNamePersistsWithoutMaterializingOtherDefaults(t *testing.T) {
+	path, original := writeDocument(t, `{"schema_version":1,"state_dir":"relative/data","destinations":[]}`)
+	doc, err := OpenDocument(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Config.DeviceName != "" {
+		t.Fatal("opening an old configuration filled in the device name")
+	}
+	doc.Config.DeviceName = "实验室 workstation"
+	if err := doc.Save(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assertBytes(t, path+".bak", original)
+	fields := readFields(t, path)
+	if len(fields) != 4 || string(fields["device_name"]) != `"实验室 workstation"` || string(fields["state_dir"]) != `"relative/data"` {
+		t.Fatal("device name edit changed unrelated omitted defaults or relative paths")
+	}
+	reopened, err := OpenDocument(path)
+	if err != nil || reopened.Config.DeviceName != "实验室 workstation" {
+		t.Fatalf("saved device name was not restored: %v", err)
+	}
+	reopened.Config.DeviceName = "Renamed laptop"
+	if err := reopened.Save(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Read(path)
+	if err != nil || c.DeviceName != "Renamed laptop" {
+		t.Fatalf("runtime did not use renamed device: %v", err)
 	}
 }
 
@@ -252,6 +283,7 @@ func TestDocumentInvalidEditsCannotPartiallyUpdateFile(t *testing.T) {
 		{"reference", func(c *Config) { c.Destinations[0].Token = "${private-secret}" }},
 		{"ID", func(c *Config) { c.Destinations = append(c.Destinations, c.Destinations[0]) }},
 		{"timing", func(c *Config) { c.PollInterval = "0s" }},
+		{"device name", func(c *Config) { c.DeviceName = " private-secret\n" }},
 		{"new disabled", func(c *Config) { c.Destinations = append(c.Destinations, Destination{ID: "new", Kind: "gotify"}) }},
 	} {
 		t.Run(change.name, func(t *testing.T) {

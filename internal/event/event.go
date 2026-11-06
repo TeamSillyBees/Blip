@@ -28,6 +28,7 @@ type Event struct {
 	SchemaVersion int        `json:"schema_version"`
 	ID            string     `json:"id"`
 	Agent         string     `json:"agent"`
+	DeviceName    string     `json:"device_name,omitempty"`
 	Kind          Kind       `json:"kind"`
 	Source        string     `json:"source"`
 	OccurredAt    time.Time  `json:"occurred_at"`
@@ -89,12 +90,20 @@ func LimitBytes(s string, limit int) string {
 
 func (e Event) Title() string {
 	label := map[Kind]string{TurnCompleted: "本轮完成", ApprovalRequested: "审批申请", InputRequested: "需要输入"}[e.Kind]
-	return "Blip · " + label + " · " + LimitBytes(e.Project, 120)
+	title := "Blip · " + label
+	if e.DeviceName != "" {
+		title += " · " + LimitBytes(e.DeviceName, 128)
+	}
+	return title + " · " + LimitBytes(e.Project, 120)
 }
 
 func (e Event) Text() string {
 	var text strings.Builder
-	fmt.Fprintf(&text, "%s\n项目：%s\n会话：%s\n轮次：%s\n时间：%s", e.Title(), e.Project, e.SessionID, e.TurnID, e.OccurredAt.Format(time.RFC3339))
+	text.WriteString(e.Title())
+	if e.DeviceName != "" {
+		text.WriteString("\n设备：" + e.DeviceName)
+	}
+	fmt.Fprintf(&text, "\n项目：%s\n会话：%s\n轮次：%s\n时间：%s", e.Project, e.SessionID, e.TurnID, e.OccurredAt.Format(time.RFC3339))
 	if e.Detail != "" {
 		text.WriteString("\n\n" + e.Detail)
 	}

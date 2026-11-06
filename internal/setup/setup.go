@@ -89,8 +89,13 @@ type controller struct {
 }
 
 func (c *controller) run(ctx context.Context, save func() error) error {
+	if c.working.DeviceName == "" {
+		if err := c.editDeviceName(ctx); err != nil {
+			return err
+		}
+	}
 	if len(c.working.Destinations) == 0 {
-		fmt.Fprintln(c.output, "添加第一个通知目的地。所有修改将在确认保存后生效；Ctrl+C 可随时取消。")
+		fmt.Fprintln(c.output, "添加第一个通知目的地。Ctrl+C 可随时取消。")
 		if err := c.add(ctx); err != nil {
 			return err
 		}
@@ -103,7 +108,7 @@ func (c *controller) run(ctx context.Context, save func() error) error {
 		if len(c.working.Destinations) > 0 {
 			choices = append(choices, Choice{"编辑目的地", "edit"}, Choice{"启用 / 停用目的地", "toggle"}, Choice{"删除目的地", "delete"})
 		}
-		choices = append(choices, Choice{"保存并退出", "save"}, Choice{"取消，不保存", "cancel"})
+		choices = append(choices, Choice{"修改设备名称", "device"}, Choice{"保存并退出", "save"}, Choice{"取消，不保存", "cancel"})
 		action, err := c.prompts.Select(ctx, "通知渠道配置", c.summary(), choices, "add")
 		if err != nil {
 			return err
@@ -113,9 +118,11 @@ func (c *controller) run(ctx context.Context, save func() error) error {
 			err = c.add(ctx)
 		case "edit", "toggle", "delete":
 			err = c.change(ctx, action)
+		case "device":
+			err = c.editDeviceName(ctx)
 		case "save":
 			var confirm bool
-			confirm, err = c.prompts.Confirm(ctx, "保存配置并退出？", c.summary()+"\n仅保存本地配置，不会发送消息或启动服务。", false)
+			confirm, err = c.prompts.Confirm(ctx, "保存配置并退出？", c.summary(), false)
 			if err == nil && confirm {
 				if err = ctx.Err(); err != nil {
 					return err
@@ -131,6 +138,26 @@ func (c *controller) run(ctx context.Context, save func() error) error {
 			return err
 		}
 	}
+}
+
+func (c *controller) editDeviceName(ctx context.Context) error {
+	initial := c.working.DeviceName
+	if initial == "" {
+		initial = config.DefaultDeviceName()
+	}
+	name, err := c.prompts.Input(ctx, TextInput{
+		Title: "设备名称", Description: "用于在通知中识别这台设备。", Initial: initial,
+		Validate: func(value string) error {
+			if err := config.ValidateDeviceName(value); err != nil {
+				return errors.New("设备名称须为 1–128 个字符，不能含首尾空格或控制字符")
+			}
+			return nil
+		},
+	})
+	if err == nil {
+		c.working.DeviceName = name
+	}
+	return err
 }
 
 func (c *controller) add(ctx context.Context) error {
@@ -162,7 +189,7 @@ func (c *controller) change(ctx context.Context, action string) error {
 		choices = append(choices, Choice{destinationLabel(d), strconv.Itoa(index)})
 	}
 	choices = append(choices, Choice{"返回主菜单", "back"})
-	selected, err := c.prompts.Select(ctx, "选择目的地", "仅显示 ID、渠道和启用状态；所有凭据均隐藏。", choices, "0")
+	selected, err := c.prompts.Select(ctx, "选择目的地", "", choices, "0")
 	if err != nil || selected == "back" {
 		return err
 	}
@@ -173,7 +200,7 @@ func (c *controller) change(ctx context.Context, action string) error {
 	d := cloneDestination(c.working.Destinations[index])
 	switch action {
 	case "edit":
-		fmt.Fprintf(c.output, "编辑 %s；ID 和渠道类型保持不变。\n", safeLabel(d.ID))
+		fmt.Fprintf(c.output, "编辑 %s。\n", safeLabel(d.ID))
 		if err = c.editFields(ctx, &d); err == nil {
 			c.working.Destinations[index] = d
 		}
@@ -183,11 +210,11 @@ func (c *controller) change(ctx context.Context, action string) error {
 			verb = "停用"
 		}
 		var confirm bool
-		confirm, err = c.prompts.Confirm(ctx, verb+" "+safeLabel(d.ID)+"？", "此修改将在保存后生效。", false)
+		confirm, err = c.prompts.Confirm(ctx, verb+" "+safeLabel(d.ID)+"？", "", false)
 		if err == nil && confirm {
 			d.Enabled = !d.Enabled
 			if d.Enabled {
-				if validationErr := config.ValidateDestination(d, false); validationErr != nil {
+				if validationErr := config.ValidateDestination(d); validationErr != nil {
 					fmt.Fprintln(c.output, "无法启用：请先编辑并补全该目的地配置。")
 					return nil
 				}
@@ -196,7 +223,7 @@ func (c *controller) change(ctx context.Context, action string) error {
 		}
 	case "delete":
 		var confirm bool
-		confirm, err = c.prompts.Confirm(ctx, "删除 "+safeLabel(d.ID)+"？", "删除该目的地及其凭据；保存前仍可取消整个会话。", false)
+		confirm, err = c.prompts.Confirm(ctx, "删除 "+safeLabel(d.ID)+"？", "保存后删除该目的地。", false)
 		if err == nil && confirm {
 			c.working.Destinations = append(c.working.Destinations[:index], c.working.Destinations[index+1:]...)
 		}
@@ -210,7 +237,7 @@ func (c *controller) editFields(ctx context.Context, d *config.Destination) erro
 		urlTitle = "Gotify 服务 URL"
 	}
 	var err error
-	d.URL, err = c.credential(ctx, urlTitle, d.URL, true, validateURL)
+	d.URL, err = c.prompts.Input(ctx, TextInput{Title: urlTitle, Initial: d.URL, Validate: validateURL})
 	if err != nil {
 		return err
 	}
@@ -242,7 +269,7 @@ func (c *controller) editFields(ctx context.Context, d *config.Destination) erro
 	if err != nil {
 		return err
 	}
-	if err = config.ValidateDestination(*d, false); err != nil {
+	if err = config.ValidateDestination(*d); err != nil {
 		return fmt.Errorf("目的地配置无效：%w", err)
 	}
 	return nil
@@ -250,11 +277,11 @@ func (c *controller) editFields(ctx context.Context, d *config.Destination) erro
 
 func (c *controller) credential(ctx context.Context, title, current string, required bool, validate func(string) error) (string, error) {
 	if current != "" {
-		choices := []Choice{{"保留现有值（隐藏）", "keep"}, {"替换为新值", "change"}}
+		choices := []Choice{{"保留现有值", "keep"}, {"替换为新值", "change"}}
 		if !required {
 			choices = append(choices, Choice{"清除现有值", "clear"})
 		}
-		action, err := c.prompts.Select(ctx, title, "现有内容不会显示或展开；选择保留也会保留环境变量引用。", choices, "keep")
+		action, err := c.prompts.Select(ctx, title, "", choices, "keep")
 		if err != nil {
 			return "", err
 		}
@@ -268,13 +295,13 @@ func (c *controller) credential(ctx context.Context, title, current string, requ
 			return "", errors.New("无效的凭据操作")
 		}
 	}
-	description := "输入隐藏。支持 ${ENV_VAR} 引用；此处不读取环境变量或联网验证。"
+	description := ""
 	if !required && current == "" {
-		description += "留空表示不设置。"
+		description = "可留空。"
 	}
 	return c.prompts.Input(ctx, TextInput{Title: title, Description: description, Secret: true, Validate: func(value string) error {
 		if (required || current != "") && strings.TrimSpace(value) == "" {
-			return errors.New("请输入新值；如需保留或清除，请取消并重新选择对应操作")
+			return errors.New("请输入新值")
 		}
 		return validate(value)
 	}})
@@ -283,7 +310,7 @@ func (c *controller) credential(ctx context.Context, title, current string, requ
 func (c *controller) editHeaders(ctx context.Context, d *config.Destination) error {
 	for {
 		keys := sortedHeaderKeys(d.Headers)
-		description := "可添加固定请求头，值始终隐藏。Bearer Token 与 Authorization 请求头只能二选一。"
+		description := "Bearer Token 与 Authorization 请求头只能二选一。"
 		if len(keys) > 0 {
 			description += "\n已设置：" + strings.Join(keys, "、")
 		}
@@ -314,7 +341,7 @@ func (c *controller) editHeaders(ctx context.Context, d *config.Destination) err
 		if action == "edit" || action == "delete" {
 			headerChoices := make([]Choice, 0, len(keys)+1)
 			for _, key := range keys {
-				headerChoices = append(headerChoices, Choice{key + "（值隐藏）", key})
+				headerChoices = append(headerChoices, Choice{key, key})
 			}
 			headerChoices = append(headerChoices, Choice{"返回请求头菜单", ""})
 			oldName, err = c.prompts.Select(ctx, "选择请求头", "", headerChoices, "")
@@ -338,7 +365,7 @@ func (c *controller) editHeaders(ctx context.Context, d *config.Destination) err
 		if action != "add" && action != "edit" {
 			return errors.New("无效的请求头操作")
 		}
-		name, err := c.prompts.Input(ctx, TextInput{Title: "请求头名称", Initial: oldName, Description: "例如 X-API-Key。系统管理的请求头不能覆盖。", Validate: func(name string) error {
+		name, err := c.prompts.Input(ctx, TextInput{Title: "请求头名称", Initial: oldName, Description: "例如 X-API-Key。", Validate: func(name string) error {
 			if err := config.ValidateHeader(name, ""); err != nil {
 				return errors.New("请输入有效的请求头名称，不可覆盖系统管理的请求头")
 			}
@@ -357,7 +384,7 @@ func (c *controller) editHeaders(ctx context.Context, d *config.Destination) err
 		}
 		value, err := c.credential(ctx, "请求头值（"+name+"）", d.Headers[oldName], false, func(value string) error {
 			if err := config.ValidateHeader(name, value); err != nil {
-				return errors.New("请求头值不能包含控制字符，环境变量引用格式为 ${ENV_VAR}")
+				return errors.New("请求头值无效")
 			}
 			return nil
 		})
@@ -396,7 +423,7 @@ func (c *controller) nextID(kind string) string {
 }
 
 func (c *controller) summary() string {
-	lines := []string{fmt.Sprintf("共 %d 个目的地；修改仅在保存后生效。", len(c.working.Destinations))}
+	lines := []string{"设备：" + safeLabel(c.working.DeviceName), fmt.Sprintf("共 %d 个目的地。", len(c.working.Destinations))}
 	for _, d := range c.working.Destinations {
 		lines = append(lines, destinationLabel(d))
 	}
@@ -422,8 +449,8 @@ func safeLabel(value string) string {
 }
 
 func validateURL(value string) error {
-	if err := config.ValidateDestination(config.Destination{ID: "input", Kind: "wecom", URL: value}, false); err != nil {
-		return errors.New("请输入有效的 HTTP(S) URL 或 ${ENV_VAR} 引用；不可包含用户信息、片段或无效端口")
+	if err := config.ValidateDestination(config.Destination{ID: "input", Kind: "wecom", URL: value}); err != nil {
+		return errors.New("请输入有效的 HTTP(S) URL，不可包含登录信息或片段")
 	}
 	return nil
 }
@@ -433,15 +460,15 @@ func validateToken(value string, required bool) error {
 	if required {
 		kind = "gotify"
 	}
-	if err := config.ValidateDestination(config.Destination{ID: "input", Kind: kind, URL: "https://example.invalid", Token: value}, false); err != nil {
-		return errors.New("Token 不能为空或包含空白、控制字符；环境变量引用格式为 ${ENV_VAR}")
+	if err := config.ValidateDestination(config.Destination{ID: "input", Kind: kind, URL: "https://example.invalid", Token: value}); err != nil {
+		return errors.New("Token 无效，不能包含空白或控制字符")
 	}
 	return nil
 }
 
 func validateSecret(value string) error {
-	if err := config.ValidateDestination(config.Destination{ID: "input", Kind: "feishu", URL: "https://example.invalid", Secret: value}, false); err != nil {
-		return errors.New("Secret 格式无效；环境变量引用格式为 ${ENV_VAR}")
+	if err := config.ValidateDestination(config.Destination{ID: "input", Kind: "feishu", URL: "https://example.invalid", Secret: value}); err != nil {
+		return errors.New("Secret 格式无效")
 	}
 	return nil
 }

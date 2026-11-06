@@ -28,6 +28,8 @@ blip start
 blip test
 ```
 
+当前源码版本为 `0.2.0-dev.1`，尚未发布；公共 npm 仍为 `0.2.0-dev.0`。下面的设备名称设置和简化配置向导可先通过源码构建使用。
+
 直接运行单文件时，使用下面的构建方式；构建需要 Go 1.25.8 或更新版本，运行生成的程序不需要安装 Go 或 Node.js。
 
 ```powershell
@@ -37,15 +39,15 @@ go build -o bin/blip.exe ./cmd/blip
 
 `configure` 是交互式配置向导（也可写作 `config` 或 `setup`），由 [Cobra](https://github.com/spf13/cobra) 管理命令、[Charm Huh](https://github.com/charmbracelet/huh) 提供终端表单。向导支持新增、编辑、启用、停用和删除渠道目的地；飞书填写 Webhook 和可选签名密钥，企业微信填写 Webhook，Gotify 填写服务地址、应用 token 和优先级，自定义 Webhook 支持 Bearer token 或静态请求头。一个渠道可配置多个目的地。
 
-密钥及可能含凭据的 URL 使用遮蔽输入，编辑时可保留现值；`${环境变量名}` 引用会原样保存。修改先保存在内存中，确认保存后一次写入配置；取消或 Ctrl+C 不保存。已有配置更新前会备份为 `config.json.bak`，若另一程序同时修改了文件，向导会拒绝覆盖并提示重新打开。保存后按提示安装 Codex hook、启动后台进程；修改运行中的配置需要 `stop`、`start` 才能生效。
+首次配置会填写“设备名称”，默认使用当前计算机名（hostname），可自行修改；之后可在主菜单修改，保存为 `device_name`。`blip init` 也会写入当前计算机名。旧配置缺少该字段时，运行时默认使用当前计算机名，再次打开向导可确认并保存。
+
+URL 明文显示并可直接编辑；Token、签名密钥和请求头值使用遮蔽输入，编辑时可保留现值。修改先保存在内存中，确认保存后一次写入配置；取消或 Ctrl+C 不保存。已有配置更新前会备份为 `config.json.bak`，若另一程序同时修改了文件，向导会拒绝覆盖并提示重新打开。保存后按提示安装 Codex hook、启动后台进程；修改运行中的配置需要 `stop`、`start` 才能生效。
 
 配置默认保存在 `%APPDATA%\Blip\config.json`。在真实终端运行向导；需要屏幕阅读器友好的文本提示时使用 `blip configure --accessible`。脚本环境可使用 `blip init` 生成示例后编辑 JSON；[配置示例](internal/config/example.json)中的所有目的地默认关闭。
 
-例如，启用飞书群机器人时，在运行 `start` 的终端设置：
+例如，启用飞书群机器人时，在配置向导中选择飞书，填写 Webhook URL 和可选的签名密钥，保存后执行：
 
 ```powershell
-$env:BLIP_FEISHU_URL = 'https://open.feishu.cn/open-apis/bot/v2/hook/替换为你的地址'
-$env:BLIP_FEISHU_SECRET = '替换为机器人签名密钥'
 .\bin\blip.exe install codex
 .\bin\blip.exe start
 .\bin\blip.exe test
@@ -80,7 +82,7 @@ version             显示版本
 .\bin\blip.exe --config 'D:\我的工具\Blip\config.json' start
 ```
 
-配置变更后执行 `stop`、`start` 生效。后台进程在启动时解析密钥环境变量；hook、停止、卸载和状态查询无需读取这些密钥。`codex_home` 默认为环境变量 `CODEX_HOME`，未设置时使用 `~/.codex`；也可以在配置中指定。`state_dir` 默认为配置文件同目录下的 `data`。相对路径以配置文件目录为基准。
+配置变更后执行 `stop`、`start` 生效。`codex_home` 默认按 Codex 的 `CODEX_HOME` 设置定位，未设置时使用 `~/.codex`；也可以在配置中指定。`state_dir` 默认为配置文件同目录下的 `data`。相对路径以配置文件目录为基准。
 
 `status` 的 `running` 表示后台进程持有运行锁，`ready` 表示它已完成一次采集检查。`collector_error` 非空时，完成事件采集遇到了问题，请结合 `data/worker.log` 检查；已入队通知仍独立投递。`destinations` 按目的地列出投递数量与最近失败记录的 `last_error`，不输出目的地 URL 或凭据。`stop` 可中断长轮询和等待中的网络请求；未确认送达的通知会保留到下次启动。
 
@@ -97,9 +99,9 @@ version             显示版本
 
 Gotify 的 `url` 可以包含反向代理子路径，Blip 会在其后追加 `/message`。使用应用 token。自定义 webhook 的 `token` 对应 `Authorization: Bearer ...`，也可以通过 `headers` 指定鉴权；两者不要重复配置 Authorization。
 
-URL、token、secret、header 值都支持 `${环境变量名}`。启用的目的地引用缺失变量时，后台进程拒绝启动；关闭的示例无需准备凭据。不要把填有真实密钥的配置提交到版本库。
+URL、token、secret 和 header 值直接填写在本地配置中，不再支持环境变量引用。升级旧配置时，请将 `${变量名}` 替换为实际值；含此类引用的目的地需要修正后才能启用。不要把填有真实密钥的配置提交到版本库。
 
-通知默认包含项目、会话、轮次、发生时间和简短详情。完成附回复摘要，输入附问题与选项，审批附工具与申请原因。中文与 emoji 按 UTF-8 安全截断，企业微信文本限制为 2048 字节；飞书同时限制编码后的请求体大小。
+通知标题和正文包含设备名称，便于在 Gotify 等渠道区分不同开发设备；正文还包含项目、会话、轮次、发生时间和简短详情。完成附回复摘要，输入附问题与选项，审批附工具与申请原因。事件入队时记录设备名，修改名称不会改写已经入队的新格式通知。中文与 emoji 按 UTF-8 安全截断，企业微信文本限制为 2048 字节；飞书同时限制编码后的请求体大小。
 
 自定义 webhook 的固定版本格式见 [webhook 协议](docs/webhook.md)。
 

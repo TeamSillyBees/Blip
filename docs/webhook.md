@@ -7,6 +7,7 @@ Blip 使用 HTTP POST，`Content-Type: application/json`，任何 HTTP 2xx 表�
   "schema_version": 1,
   "id": "64位十六进制事件标识",
   "agent": "codex",
+  "device_name": "开发电脑 A",
   "kind": "input_requested",
   "source": "codex/hooks",
   "occurred_at": "2026-10-25T09:30:00Z",
@@ -22,7 +23,7 @@ Blip 使用 HTTP POST，`Content-Type: application/json`，任何 HTTP 2xx 表�
 }
 ```
 
-`kind` 为 `turn_completed`、`approval_requested`、`input_requested`。`source` 为 `codex/hooks` 或 `codex/rollout`；手动测试通知使用 `blip/test`。`request_id`、`cwd`、`detail`、`questions` 在没有内容时可以缺省；发生时间采用 RFC 3339 UTC。
+`kind` 为 `turn_completed`、`approval_requested`、`input_requested`。`source` 为 `codex/hooks` 或 `codex/rollout`；手动测试通知使用 `blip/test`。`device_name` 为配置中的设备名称，默认当前计算机名；这是协议 v1 新增的可选字段，旧记录可能缺省。`request_id`、`cwd`、`detail`、`questions` 在没有内容时可以缺省；发生时间采用 RFC 3339 UTC。
 
 每次重试携带相同的 `id` 和 `X-Blip-Event-Id` 请求头。接收端应先持久接收，再返回 2xx，并按事件标识去重。Blip 的本地去重与外部接收不是一个事务，存在重复投递窗口。
 

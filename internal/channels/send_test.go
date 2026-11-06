@@ -17,7 +17,7 @@ import (
 )
 
 func sample(kind event.Kind) event.Event {
-	return event.Event{SchemaVersion: 1, ID: event.ID("test", string(kind)), Agent: "codex", Kind: kind, Source: "codex/hooks", OccurredAt: time.Unix(1599360473, 0).UTC(), SessionID: "session", TurnID: "turn", Project: "中文项目", Detail: strings.Repeat("中文🙂", 600)}
+	return event.Event{SchemaVersion: 1, ID: event.ID("test", string(kind)), Agent: "codex", DeviceName: "开发工作站🙂", Kind: kind, Source: "codex/hooks", OccurredAt: time.Unix(1599360473, 0).UTC(), SessionID: "session", TurnID: "turn", Project: "中文项目", Detail: strings.Repeat("中文🙂", 600)}
 }
 
 func TestAllEventKindsReachAllChannelProtocols(t *testing.T) {
@@ -39,10 +39,13 @@ func TestAllEventKindsReachAllChannelProtocols(t *testing.T) {
 						if body["msg_type"] != "text" || body["timestamp"] != "1599360473" || body["sign"] != "q4jswNiMy51J5JuQV566yJat0/lQ/c+22kINzUgKsGU=" {
 							t.Error("incorrect Feishu protocol or signature")
 						}
+						if !strings.Contains(body["content"].(map[string]any)["text"].(string), "设备：开发工作站🙂") {
+							t.Error("Feishu notification lost device name")
+						}
 						io.WriteString(writer, `{"code":0}`)
 					case "wecom":
 						text := body["text"].(map[string]any)["content"].(string)
-						if body["msgtype"] != "text" || len(text) > 2048 || !utf8.ValidString(text) {
+						if body["msgtype"] != "text" || len(text) > 2048 || !utf8.ValidString(text) || !strings.Contains(text, "设备：开发工作站🙂") {
 							t.Error("WeCom text byte limit violated")
 						}
 						io.WriteString(writer, `{"errcode":0}`)
@@ -50,9 +53,12 @@ func TestAllEventKindsReachAllChannelProtocols(t *testing.T) {
 						if request.URL.Path != "/prefix/message" || request.Header.Get("X-Gotify-Key") != "test-token" || body["priority"] != float64(5) {
 							t.Error("wrong Gotify path, token or priority")
 						}
+						if !strings.Contains(body["title"].(string), "开发工作站🙂") || !strings.Contains(body["message"].(string), "设备：开发工作站🙂") {
+							t.Error("Gotify title or message lost device name")
+						}
 						io.WriteString(writer, `{"id":12,"appid":2}`)
 					case "webhook":
-						if body["kind"] != string(kind) || body["schema_version"] != float64(1) || request.Header.Get("Authorization") != "Bearer test-token" || request.Header.Get("X-Source") != "test" || request.Header.Get("X-Blip-Event-Id") != sample(kind).ID {
+						if body["kind"] != string(kind) || body["schema_version"] != float64(1) || body["device_name"] != "开发工作站🙂" || request.Header.Get("Authorization") != "Bearer test-token" || request.Header.Get("X-Source") != "test" || request.Header.Get("X-Blip-Event-Id") != sample(kind).ID {
 							t.Error("wrong custom webhook contract")
 						}
 						writer.WriteHeader(http.StatusNoContent)

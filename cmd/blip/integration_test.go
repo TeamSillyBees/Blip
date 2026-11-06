@@ -59,7 +59,8 @@ func TestCLIEndToEnd(t *testing.T) {
 	if err := os.MkdirAll(sessions, 0700); err != nil {
 		t.Fatal(err)
 	}
-	settings := map[string]any{"schema_version": 1, "codex_home": home, "state_dir": filepath.Join(dir, "state"), "poll_interval": "100ms", "request_timeout": "1s", "max_attempts": 2, "destinations": []any{map[string]any{"id": "loopback", "kind": "webhook", "enabled": true, "url": server.URL, "token": "local-test-only"}}}
+	const deviceName = "开发电脑 A"
+	settings := map[string]any{"schema_version": 1, "device_name": deviceName, "codex_home": home, "state_dir": filepath.Join(dir, "state"), "poll_interval": "100ms", "request_timeout": "1s", "max_attempts": 2, "destinations": []any{map[string]any{"id": "loopback", "kind": "webhook", "enabled": true, "url": server.URL, "token": "local-test-only"}}}
 	data, _ := json.Marshal(settings)
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
@@ -116,6 +117,9 @@ func TestCLIEndToEnd(t *testing.T) {
 		select {
 		case notification := <-received:
 			kinds[notification.Kind]++
+			if notification.DeviceName != deviceName {
+				t.Fatalf("%s notification lost configured device name: %q", notification.Kind, notification.DeviceName)
+			}
 			if notification.TurnID == "historical" {
 				t.Fatal("historical completion replayed")
 			}
@@ -141,6 +145,9 @@ func TestCLIEndToEnd(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		select {
 		case notification := <-received:
+			if notification.DeviceName != deviceName {
+				t.Fatalf("restart lost configured device name: %q", notification.DeviceName)
+			}
 			if notification.TurnID == "historical" {
 				t.Fatal("restart replayed history")
 			}
@@ -153,6 +160,15 @@ func TestCLIEndToEnd(t *testing.T) {
 		_ = json.Unmarshal(call("status"), &status)
 		return status["delivered"] == float64(5)
 	})
+	call("test")
+	select {
+	case notification := <-received:
+		if notification.Source != "blip/test" || notification.DeviceName != deviceName {
+			t.Fatalf("test notification lost its source or device name: %+v", notification)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("test notification timed out")
+	}
 	select {
 	case extra := <-received:
 		t.Fatalf("duplicate or subagent notification: %+v", extra)

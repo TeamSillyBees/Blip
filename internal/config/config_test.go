@@ -8,12 +8,10 @@ import (
 	"testing"
 )
 
-func TestConfigEnvironmentAndRelativePaths(t *testing.T) {
-	t.Setenv("BLIP_TEST_URL", "https://example.invalid/notify")
-	t.Setenv("BLIP_TEST_TOKEN", "test-token")
+func TestConfigLiteralSettingsAndRelativePaths(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	data := `{"schema_version":1,"state_dir":"state","codex_home":"codex","destinations":[{"id":"custom","kind":"webhook","enabled":true,"url":"${BLIP_TEST_URL}","token":"${BLIP_TEST_TOKEN}"},{"id":"off","kind":"feishu","enabled":false,"url":"${UNSET_EXAMPLE_VARIABLE}"}]}`
+	data := `{"schema_version":1,"state_dir":"state","codex_home":"codex","destinations":[{"id":"custom","kind":"webhook","enabled":true,"url":"https://example.invalid/notify","token":"test-token"},{"id":"off","kind":"feishu","enabled":false,"url":""}]}`
 	_ = os.WriteFile(path, []byte(data), 0600)
 	c, err := Read(path)
 	if err != nil {
@@ -37,21 +35,87 @@ func TestInvalidConfigDoesNotLeakCredentials(t *testing.T) {
 	}
 }
 
-func TestLocalCommandsDoNotRequireNotificationSecrets(t *testing.T) {
+func TestLocalCommandsDoNotRequireValidChannelSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	_ = os.WriteFile(path, []byte(`{"schema_version":1,"destinations":[{"id":"one","kind":"gotify","enabled":true,"url":"${BLIP_URL_UNAVAILABLE_IN_CODEX}","token":"${BLIP_TOKEN_UNAVAILABLE_IN_CODEX}"}]}`), 0600)
+	_ = os.WriteFile(path, []byte(`{"schema_version":1,"destinations":[{"id":"one","kind":"gotify","enabled":true,"url":"https://example.invalid"}]}`), 0600)
 	if c, err := ReadLocal(path); err != nil || len(c.Enabled()) != 1 {
 		t.Fatalf("hook cannot enqueue without credentials: %v", err)
 	}
 	if _, err := Read(path); err == nil {
-		t.Fatal("sending must still require resolved credentials")
+		t.Fatal("sending must still require valid channel settings")
 	}
 }
 
 func TestLiteralDollarSignsInCredentialsArePreserved(t *testing.T) {
-	value := "literal$credential"
-	if err := expand(&value); err != nil || value != "literal$credential" {
-		t.Fatal("literal credential was expanded")
+	t.Setenv("BLIP_TEST_TOKEN", "not-the-literal-token")
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"schema_version":1,"destinations":[{"id":"one","kind":"webhook","enabled":true,"url":"https://example.invalid","token":"literal$BLIP_TEST_TOKEN"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Read(path)
+	if err != nil || c.Destinations[0].Token != "literal$BLIP_TEST_TOKEN" {
+		t.Fatalf("literal credential changed: %v", err)
+	}
+}
+
+func TestDeviceNameDefaultsForOldConfigurationWithoutChangingFile(t *testing.T) {
+	path, original := writeDocument(t, `{"schema_version":1,"destinations":[]}`)
+	for _, read := range []func(string) (Config, error){Read, ReadLocal} {
+		c, err := read(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.DeviceName != DefaultDeviceName() || ValidateDeviceName(c.DeviceName) != nil {
+			t.Fatal("old configuration did not default to a valid device name")
+		}
+	}
+	assertBytes(t, path, original)
+	doc, err := OpenDocument(path)
+	if err != nil || doc.Config.DeviceName != "" {
+		t.Fatalf("editor must retain an absent device name for first setup: %v", err)
+	}
+}
+
+func TestDeviceNameCustomValueIsUsedByBothReaders(t *testing.T) {
+	path, _ := writeDocument(t, `{"schema_version":1,"device_name":"实验室 workstation","destinations":[]}`)
+	for _, read := range []func(string) (Config, error){Read, ReadLocal} {
+		c, err := read(path)
+		if err != nil || c.DeviceName != "实验室 workstation" {
+			t.Fatalf("custom device name was not preserved: %v", err)
+		}
+	}
+}
+
+func TestReadRejectsEnvironmentReferencesEvenWhenVariableIsSet(t *testing.T) {
+	t.Setenv("BLIP_REMOVED_REFERENCE", "private-token")
+	path, _ := writeDocument(t, `{"schema_version":1,"destinations":[{"id":"one","kind":"webhook","enabled":true,"url":"https://example.invalid","token":"${BLIP_REMOVED_REFERENCE}"}]}`)
+	if _, err := Read(path); err == nil || !strings.Contains(err.Error(), "no longer supported") || strings.Contains(err.Error(), "private-token") || strings.Contains(err.Error(), "BLIP_REMOVED_REFERENCE") {
+		t.Fatalf("environment reference was accepted or leaked its value: %v", err)
+	}
+}
+
+func TestExampleUsesCurrentDeviceNameAndLiteralSettings(t *testing.T) {
+	data, err := ExampleBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "${") {
+		t.Fatal("example still contains environment references")
+	}
+	var c Config
+	if err := json.Unmarshal(data, &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.DeviceName != DefaultDeviceName() || len(c.Destinations) == 0 {
+		t.Fatal("example did not include this computer's name and sample channels")
+	}
+	for _, d := range c.Destinations {
+		if d.Enabled {
+			t.Fatal("sample destinations must start disabled")
+		}
+		if err := ValidateDestination(d); err != nil {
+			t.Fatalf("sample has invalid literal fields: %v", err)
+		}
 	}
 }
 

@@ -64,7 +64,7 @@ test('missing optional dependencies explain how to recover', () => {
   run([], state.dependencies);
   assert.equal(state.runtime.exitCode, 1);
   assert.equal(state.calls.length, 0);
-  assert.match(state.stderr, /@teamsillybees\/blip-linux-x64@0\.2\.0-dev\.0 is missing/);
+  assert.ok(state.stderr.includes(`@teamsillybees/blip-linux-x64@${manifest.version} is missing`));
   assert.match(state.stderr, /--include=optional/);
   assert.doesNotMatch(state.stderr, /at resolveBinary/);
 });

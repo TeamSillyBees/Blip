@@ -40,8 +40,18 @@ func (p *huhPrompter) Select(ctx context.Context, title, description string, cho
 func (p *huhPrompter) Input(ctx context.Context, spec TextInput) (string, error) {
 	value := spec.Initial
 	field := huh.NewInput().Title(spec.Title).Description(spec.Description).Value(&value).Password(spec.Secret)
+	if p.accessible && !spec.Secret && spec.Initial != "" {
+		field.Title(spec.Title + " [" + spec.Initial + "]")
+	}
 	if spec.Validate != nil {
-		field.Validate(spec.Validate)
+		field.Validate(func(value string) error {
+			// Huh validates accessible input before applying its initial value.
+			// Let Enter retain a displayed default, as it does in the normal form.
+			if p.accessible && !spec.Secret && value == "" && spec.Initial != "" {
+				return spec.Validate(spec.Initial)
+			}
+			return spec.Validate(value)
+		})
 	}
 	err := p.run(ctx, field, spec.Description)
 	if err != nil {

@@ -20,8 +20,8 @@ import (
 // document and review the newer settings before trying to save again.
 var ErrConflict = errors.New("configuration changed while editing; reopen it before saving")
 
-// Document holds editable, unresolved configuration. Opening a document never
-// creates a file, applies defaults, resolves paths, or reads credential values.
+// Document holds editable configuration. Opening a document never creates a
+// file, applies runtime defaults, or resolves relative paths.
 // Change Config and call Save to publish it; discard it to cancel. A Document
 // should be used by only one goroutine at a time.
 type Document struct {
@@ -62,7 +62,6 @@ func OpenDocument(path string) (*Document, error) {
 // Cooperating editors share a file lock and stale snapshots are rejected. An
 // existing file is backed up to <path>.bak only when its settings change. Both
 // the new file and backup use mode 0600 where the OS supports Unix permissions.
-// No environment expansion occurs here.
 func (d *Document) Save(ctx context.Context) error {
 	if d == nil || d.path == "" {
 		return fmt.Errorf("configuration document must be opened before saving")
@@ -155,7 +154,7 @@ func (d *Document) validate() error {
 			// destination to be disabled without first repairing its settings.
 			continue
 		}
-		if err := ValidateDestination(destination, false); err != nil {
+		if err := ValidateDestination(destination); err != nil {
 			return fmt.Errorf("validate destination: %w", err)
 		}
 	}
@@ -203,7 +202,7 @@ func decodeDocument(data []byte, c *Config) error {
 	}
 	for name := range fields {
 		switch name {
-		case "schema_version", "state_dir", "codex_home", "poll_interval", "request_timeout", "max_attempts", "destinations":
+		case "schema_version", "device_name", "state_dir", "codex_home", "poll_interval", "request_timeout", "max_attempts", "destinations":
 		default:
 			return fmt.Errorf("unknown configuration field")
 		}
@@ -331,7 +330,7 @@ func (d *Document) encode() ([]byte, error) {
 
 func configFields(c Config) (map[string]json.RawMessage, error) {
 	return encodeFields(map[string]any{
-		"schema_version": c.SchemaVersion, "state_dir": c.StateDir,
+		"schema_version": c.SchemaVersion, "device_name": c.DeviceName, "state_dir": c.StateDir,
 		"codex_home": c.CodexHome, "poll_interval": c.PollInterval,
 		"request_timeout": c.RequestTimeout, "max_attempts": c.MaxAttempts,
 	})

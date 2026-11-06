@@ -4,10 +4,36 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
+
+// DefaultDeviceName returns this computer's hostname for new configurations and
+// older files that do not specify a device name.
+func DefaultDeviceName() string {
+	name, err := os.Hostname()
+	if err != nil || ValidateDeviceName(name) != nil {
+		return "Unknown device"
+	}
+	return name
+}
+
+// ValidateDeviceName accepts a short, single-line name for notifications.
+func ValidateDeviceName(name string) error {
+	if !utf8.ValidString(name) || name == "" || strings.TrimSpace(name) != name || utf8.RuneCountInString(name) > 128 {
+		return fmt.Errorf("device name must contain 1 to 128 characters without leading or trailing spaces")
+	}
+	for _, char := range name {
+		if unicode.IsControl(char) || char == '\u2028' || char == '\u2029' {
+			return fmt.Errorf("device name must not contain control characters or line breaks")
+		}
+	}
+	return rejectReference(name)
+}
 
 // Clone returns independent settings suitable for staging an edit.
 func (c Config) Clone() Config {
@@ -35,6 +61,11 @@ func cloneDestination(d Destination) Destination {
 func validateStructure(c Config) error {
 	if c.SchemaVersion != 1 {
 		return fmt.Errorf("configuration schema_version must be 1")
+	}
+	if c.DeviceName != "" {
+		if err := ValidateDeviceName(c.DeviceName); err != nil {
+			return err
+		}
 	}
 	if c.MaxAttempts < 0 || c.MaxAttempts > 20 {
 		return fmt.Errorf("max_attempts must be between 1 and 20 (or omitted)")
@@ -70,37 +101,21 @@ func supportedKind(kind string) bool {
 	}
 }
 
-// ValidateDestination checks a candidate even when it is disabled. With resolve
-// false, environment references are checked without reading their values. With
-// resolve true, a private copy is expanded and checked for sending. The caller's
-// destination, including its headers, is never changed. Errors omit credentials.
-func ValidateDestination(d Destination, resolve bool) error {
-	d = cloneDestination(d)
-	return validateDestination(&d, resolve)
-}
-
-func validateDestination(d *Destination, resolve bool) error {
+// ValidateDestination checks literal channel settings even when the candidate
+// is disabled. It never changes the destination and errors omit credentials.
+func ValidateDestination(d Destination) error {
 	if d.ID == "" {
 		return fmt.Errorf("destination ID must be nonempty")
 	}
 	if !supportedKind(d.Kind) {
 		return fmt.Errorf("unsupported destination kind")
 	}
-	for _, value := range []*string{&d.URL, &d.Token, &d.Secret} {
-		if err := validateReferences(*value); err != nil {
+	for _, value := range []string{d.URL, d.Token, d.Secret} {
+		if err := rejectReference(value); err != nil {
 			return err
 		}
-		if resolve {
-			if err := expand(value); err != nil {
-				return err
-			}
-		}
 	}
-	address := d.URL
-	if !resolve {
-		address = templateURL(address)
-	}
-	if err := validateURL(address); err != nil {
+	if err := validateURL(d.URL); err != nil {
 		return err
 	}
 	if d.Kind == "gotify" && d.Token == "" {
@@ -121,20 +136,11 @@ func validateDestination(d *Destination, resolve bool) error {
 		if err := ValidateHeader(key, value); err != nil {
 			return err
 		}
-		if resolve {
-			if err := expand(&value); err != nil {
-				return err
-			}
-			if !validHeader(key, value) {
-				return fmt.Errorf("destination contains an invalid header")
-			}
-		}
 		canonical := http.CanonicalHeaderKey(key)
 		if headerNames[canonical] {
 			return fmt.Errorf("destination contains duplicate header names")
 		}
 		headerNames[canonical] = true
-		d.Headers[key] = value
 	}
 	if d.Token != "" && d.Kind == "webhook" && hasAuthorization(d.Headers) {
 		return fmt.Errorf("destination must choose token or Authorization header")
@@ -142,50 +148,11 @@ func validateDestination(d *Destination, resolve bool) error {
 	return nil
 }
 
-func validateReferences(value string) error {
-	for {
-		start := strings.Index(value, "${")
-		if start < 0 {
-			return nil
-		}
-		value = value[start:]
-		match := variablePattern.FindStringIndex(value)
-		if match == nil || match[0] != 0 {
-			return fmt.Errorf("environment references must use ${VARIABLE_NAME}")
-		}
-		value = value[match[1]:]
+func rejectReference(value string) error {
+	if strings.Contains(value, "${") {
+		return fmt.Errorf("environment variable references are no longer supported; enter a literal value")
 	}
-}
-
-// templateURL substitutes harmless syntactic stand-ins, never environment
-// values. A reference may contain a whole URL, a scheme, host, port, or path.
-// Its actual value is checked again by Read before a notification is sent.
-func templateURL(value string) string {
-	locations := variablePattern.FindAllStringIndex(value, -1)
-	var result strings.Builder
-	end := 0
-	for _, location := range locations {
-		start, stop := location[0], location[1]
-		result.WriteString(value[end:start])
-		replacement := "blip-env"
-		if start == 0 {
-			switch {
-			case strings.HasPrefix(value[stop:], "://"):
-				replacement = "https"
-			case stop == len(value), strings.ContainsAny(value[stop:stop+1], "/?#"):
-				replacement = "https://example.invalid"
-			}
-		} else if prefix := result.String(); strings.Contains(prefix, "://") {
-			authority := strings.SplitN(prefix, "://", 2)[1]
-			if !strings.ContainsAny(authority, "/?#") && strings.HasSuffix(authority, ":") {
-				replacement = "1"
-			}
-		}
-		result.WriteString(replacement)
-		end = stop
-	}
-	result.WriteString(value[end:])
-	return result.String()
+	return nil
 }
 
 func validateURL(value string) error {
@@ -202,13 +169,13 @@ func validateURL(value string) error {
 	return nil
 }
 
-// ValidateHeader checks a custom webhook header without expanding environment
-// references. It also rejects headers managed by the HTTP sender.
+// ValidateHeader checks a literal custom webhook header and rejects headers
+// managed by the HTTP sender.
 func ValidateHeader(key, value string) error {
 	if !validHeader(key, value) {
 		return fmt.Errorf("destination contains an invalid or reserved header")
 	}
-	return validateReferences(value)
+	return rejectReference(value)
 }
 
 func validHeader(key, value string) bool {

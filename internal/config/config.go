@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"time"
 )
 
@@ -24,6 +23,7 @@ type Destination struct {
 
 type Config struct {
 	SchemaVersion  int           `json:"schema_version"`
+	DeviceName     string        `json:"device_name,omitempty"`
 	StateDir       string        `json:"state_dir,omitempty"`
 	CodexHome      string        `json:"codex_home,omitempty"`
 	PollInterval   string        `json:"poll_interval,omitempty"`
@@ -43,11 +43,11 @@ func DefaultPath() (string, error) {
 
 func Read(path string) (Config, error) { return read(path, true) }
 
-// ReadLocal lets hooks and lifecycle commands operate without channel credentials.
-// In particular, a running Codex desktop need not inherit a newly set token variable.
+// ReadLocal lets hooks and lifecycle commands operate without validating channel
+// credentials. Channel settings are validated when notifications are sent.
 func ReadLocal(path string) (Config, error) { return read(path, false) }
 
-func read(path string, resolve bool) (Config, error) {
+func read(path string, validateChannels bool) (Config, error) {
 	var c Config
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -69,6 +69,9 @@ func read(path string, resolve bool) (Config, error) {
 	c.Path = absolute
 	if err := validateStructure(c); err != nil {
 		return c, err
+	}
+	if c.DeviceName == "" {
+		c.DeviceName = DefaultDeviceName()
 	}
 	if c.PollInterval == "" {
 		c.PollInterval = "1s"
@@ -100,32 +103,14 @@ func read(path string, resolve bool) (Config, error) {
 	}
 	for i := range c.Destinations {
 		d := &c.Destinations[i]
-		if !d.Enabled || !resolve {
+		if !d.Enabled || !validateChannels {
 			continue
 		}
-		if err := validateDestination(d, true); err != nil {
+		if err := ValidateDestination(*d); err != nil {
 			return c, fmt.Errorf("destination %q: %w", d.ID, err)
 		}
 	}
 	return c, nil
-}
-
-var variablePattern = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
-
-func expand(value *string) error {
-	var missing bool
-	*value = variablePattern.ReplaceAllStringFunc(*value, func(reference string) string {
-		name := reference[2 : len(reference)-1]
-		result, ok := os.LookupEnv(name)
-		if !ok {
-			missing = true
-		}
-		return result
-	})
-	if missing {
-		return fmt.Errorf("a referenced environment variable is not set")
-	}
-	return nil
 }
 
 func (c Config) PollDuration() time.Duration {

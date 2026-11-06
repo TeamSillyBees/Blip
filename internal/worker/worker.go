@@ -27,6 +27,7 @@ type Dispatcher struct {
 	Sender      Sender
 	MaxAttempts int
 	Timeout     time.Duration
+	DeviceName  string
 }
 
 // DeliverOnce attempts the oldest due job for just one destination.
@@ -42,7 +43,13 @@ func (d Dispatcher) DeliverOnce(ctx context.Context, destination config.Destinat
 				continue
 			}
 			sendCtx, cancel := context.WithTimeout(ctx, d.Timeout)
-			sendErr := d.Sender.Send(sendCtx, destination, job.Event)
+			notification := job.Event
+			// Records created before device names were supported have no label.
+			// Keep names already captured at enqueue time unchanged across retries.
+			if notification.DeviceName == "" {
+				notification.DeviceName = d.DeviceName
+			}
+			sendErr := d.Sender.Send(sendCtx, destination, notification)
 			cancel()
 			finishedAt := time.Now().UTC()
 			if ctx.Err() != nil {
@@ -91,6 +98,9 @@ type Status struct {
 }
 
 func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
+	if c.DeviceName == "" {
+		c.DeviceName = config.DefaultDeviceName()
+	}
 	queue := store.Queue{Dir: c.StateDir}
 	lock, locked, err := queue.WorkerLock()
 	if err != nil {
@@ -113,7 +123,7 @@ func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
 	if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
 		return err
 	}
-	dispatcher := Dispatcher{Queue: queue, Sender: channels.New(c.TimeoutDuration()), MaxAttempts: c.MaxAttempts, Timeout: c.TimeoutDuration()}
+	dispatcher := Dispatcher{Queue: queue, Sender: channels.New(c.TimeoutDuration()), MaxAttempts: c.MaxAttempts, Timeout: c.TimeoutDuration(), DeviceName: c.DeviceName}
 	var group sync.WaitGroup
 	for _, destination := range c.Enabled() {
 		group.Add(1)
@@ -149,7 +159,11 @@ func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
 	lastQuarantined := 0
 	for {
 		status.CollectorError = ""
-		if err = collector.Poll(ctx, func(e event.Event) error { _, err := queue.Enqueue(ctx, e, destinations); return err }); err != nil && ctx.Err() == nil {
+		if err = collector.Poll(ctx, func(e event.Event) error {
+			e.DeviceName = c.DeviceName
+			_, err := queue.Enqueue(ctx, e, destinations)
+			return err
+		}); err != nil && ctx.Err() == nil {
 			if errors.Is(err, codex.ErrCheckpoint) {
 				return err
 			}

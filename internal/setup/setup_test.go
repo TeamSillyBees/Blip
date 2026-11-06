@@ -65,6 +65,9 @@ func (p *scriptedPrompter) Select(_ context.Context, title, description string, 
 func (p *scriptedPrompter) Input(_ context.Context, spec TextInput) (string, error) {
 	step := p.next("input", spec.Title, spec.Description)
 	p.inputs = append(p.inputs, spec)
+	if !spec.Secret {
+		p.shown.WriteString(spec.Initial + "\n")
+	}
 	if step.err != nil {
 		return "", step.err
 	}
@@ -115,10 +118,11 @@ func runScript(t *testing.T, path string, steps ...promptStep) (*scriptedPrompte
 func TestAddAllChannelsAndMultipleDestinations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	p, output := runScript(t, path,
+		inputStep("<default>"),
 		selectStep("wecom"), inputStep("work"), inputStep("https://wecom.invalid/hook?key=private-wecom"), confirmStep(true),
 		selectStep("add"), selectStep("feishu"), inputStep("team"), inputStep("https://feishu.invalid/private-feishu"), inputStep("private-signature"), confirmStep(true),
-		selectStep("add"), selectStep("gotify"), inputStep("phone"), inputStep("https://gotify.invalid"), inputStep("${GOTIFY_TOKEN}"), inputStep("<default>"), confirmStep(true),
-		selectStep("add"), selectStep("webhook"), inputStep("automation"), inputStep("${CUSTOM_WEBHOOK_URL}"), inputStep(""),
+		selectStep("add"), selectStep("gotify"), inputStep("phone"), inputStep("https://gotify.invalid"), inputStep("private-gotify-token"), inputStep("<default>"), confirmStep(true),
+		selectStep("add"), selectStep("webhook"), inputStep("automation"), inputStep("https://webhook.invalid/notify"), inputStep(""),
 		selectStep("add"), inputStep("X-API-Key"), inputStep("private-header"), selectStep("done"), confirmStep(false),
 		selectStep("add"), selectStep("wecom"), inputStep("other-work"), inputStep("https://wecom.invalid/another"), confirmStep(true),
 		selectStep("save"), confirmStep(true),
@@ -130,21 +134,30 @@ func TestAddAllChannelsAndMultipleDestinations(t *testing.T) {
 	if len(doc.Config.Destinations) != 5 {
 		t.Fatalf("saved %d destinations", len(doc.Config.Destinations))
 	}
+	if doc.Config.DeviceName != config.DefaultDeviceName() || p.inputs[0].Title != "设备名称" || p.inputs[0].Initial != config.DefaultDeviceName() {
+		t.Fatal("first configuration did not offer or preserve the default device name")
+	}
 	gotify := doc.Config.Destinations[2]
-	if gotify.Priority != 5 || gotify.Token != "${GOTIFY_TOKEN}" {
-		t.Fatalf("gotify defaults or env reference changed: %#v", gotify)
+	if gotify.Priority != 5 || gotify.Token != "private-gotify-token" {
+		t.Fatalf("gotify defaults or token changed: %#v", gotify)
 	}
 	if doc.Config.Destinations[3].Headers["X-API-Key"] != "private-header" || doc.Config.Destinations[3].Enabled {
 		t.Fatal("custom headers or enabled state not persisted")
 	}
 	for _, spec := range p.inputs {
-		if spec.Title != "目的地 ID" && spec.Title != "消息优先级" && spec.Title != "请求头名称" && !spec.Secret {
-			t.Errorf("credential input %q is not masked", spec.Title)
+		visible := spec.Title == "设备名称" || spec.Title == "目的地 ID" || spec.Title == "消息优先级" || spec.Title == "请求头名称" || strings.Contains(spec.Title, "URL")
+		if spec.Secret == visible {
+			t.Errorf("input %q has incorrect visibility", spec.Title)
 		}
 	}
-	for _, secret := range []string{"private-wecom", "private-feishu", "private-signature", "${GOTIFY_TOKEN}", "${CUSTOM_WEBHOOK_URL}", "private-header"} {
+	for _, secret := range []string{"private-signature", "private-gotify-token", "private-header"} {
 		if strings.Contains(output+p.shown.String(), secret) {
 			t.Errorf("display leaked %q", secret)
+		}
+	}
+	for _, hint := range []string{"输入隐藏", "环境变量", "${", "联网验证", "所有凭据", "值始终隐藏"} {
+		if strings.Contains(p.shown.String(), hint) {
+			t.Errorf("verbose hint remains: %q", hint)
 		}
 	}
 	for _, command := range []string{"blip install codex", "blip start", "blip test", "blip stop"} {
@@ -156,13 +169,14 @@ func TestAddAllChannelsAndMultipleDestinations(t *testing.T) {
 
 const existingConfig = `{
   "schema_version": 1,
+  "device_name": "Office-PC",
   "state_dir": "relative-state",
   "codex_home": "../codex-home",
   "poll_interval": "3s",
   "request_timeout": "9s",
   "max_attempts": 7,
   "destinations": [
-    {"id":"stable","kind":"webhook","enabled":true,"url":"${PRIVATE_URL}","token":"${PRIVATE_TOKEN}","headers":{"X-API-Key":"${PRIVATE_HEADER}","X-Remove":"remove-me"}},
+    {"id":"stable","kind":"webhook","enabled":true,"url":"https://example.invalid/webhook?key=visible-url-key","token":"private-token","headers":{"X-API-Key":"private-header","X-Remove":"remove-me"}},
     {"id":"untouched","kind":"feishu","enabled":false,"url":"https://example.invalid/private-url","secret":"private-secret"}
   ]
 }
@@ -177,14 +191,14 @@ func writeExisting(t *testing.T) string {
 	return path
 }
 
-func TestEditPreservesStableIDOtherSettingsAndReferences(t *testing.T) {
+func TestEditShowsURLAndPreservesStableIDOtherSettingsAndCredentials(t *testing.T) {
 	path := writeExisting(t)
 	before, err := config.OpenDocument(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p, output := runScript(t, path,
-		selectStep("edit"), selectStep("0"), selectStep("keep"), selectStep("keep"),
+		selectStep("edit"), selectStep("0"), inputStep("<default>"), selectStep("keep"),
 		selectStep("edit"), selectStep("X-API-Key"), inputStep("<default>"), selectStep("keep"),
 		selectStep("delete"), selectStep("X-Remove"), confirmStep(true),
 		selectStep("add"), inputStep("X-New"), inputStep("new-private-value"), selectStep("done"), confirmStep(true),
@@ -208,7 +222,10 @@ func TestEditPreservesStableIDOtherSettingsAndReferences(t *testing.T) {
 			t.Fatal("existing credential was supplied as a form value")
 		}
 	}
-	for _, private := range []string{"${PRIVATE_URL}", "${PRIVATE_TOKEN}", "${PRIVATE_HEADER}", "remove-me", "new-private-value", "private-secret"} {
+	if p.inputs[0].Title != "Webhook URL" || p.inputs[0].Secret || p.inputs[0].Initial != before.Config.Destinations[0].URL || !strings.Contains(p.shown.String(), "visible-url-key") {
+		t.Fatal("existing URL was not shown for direct editing")
+	}
+	for _, private := range []string{"private-token", "private-header", "remove-me", "new-private-value", "private-secret"} {
 		if strings.Contains(output+p.shown.String(), private) {
 			t.Errorf("display leaked %q", private)
 		}
@@ -220,7 +237,7 @@ func TestCancelAfterHeaderMutationLeavesOriginalBytesAndNoBackup(t *testing.T) {
 		t.Run(cancel.value+cancel.op+errorName(cancel.err), func(t *testing.T) {
 			path := writeExisting(t)
 			_, output := runScript(t, path,
-				selectStep("edit"), selectStep("0"), selectStep("keep"), selectStep("keep"),
+				selectStep("edit"), selectStep("0"), inputStep("<default>"), selectStep("keep"),
 				selectStep("delete"), selectStep("X-Remove"), confirmStep(true), selectStep("done"), confirmStep(false), cancel,
 			)
 			content, err := os.ReadFile(path)
@@ -246,9 +263,103 @@ func errorName(err error) string {
 
 func TestNewConfigCancelAndDeclinedSaveDoNotCreateFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")
-	runScript(t, path, selectStep("back"), selectStep("save"), confirmStep(false), selectStep("cancel"))
+	runScript(t, path, inputStep("My Device"), selectStep("back"), selectStep("save"), confirmStep(false), selectStep("cancel"))
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("cancel created configuration")
+	}
+}
+
+func TestFirstDeviceNameCanBeCustomizedAndValidated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	p, _ := runScript(t, path, inputStep("家里的工作电脑"), selectStep("back"), selectStep("save"), confirmStep(true))
+	doc, err := config.OpenDocument(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Config.DeviceName != "家里的工作电脑" {
+		t.Fatalf("custom device name was not saved: %q", doc.Config.DeviceName)
+	}
+	spec := p.inputs[0]
+	hostname, err := os.Hostname()
+	if err == nil && config.ValidateDeviceName(hostname) == nil && spec.Initial != hostname {
+		t.Fatalf("device name default %q differs from hostname %q", spec.Initial, hostname)
+	}
+	if spec.Secret {
+		t.Fatal("device name must be visible")
+	}
+	for _, invalid := range []string{"", "   ", " leading", "trailing ", "line\nbreak", strings.Repeat("名", 129)} {
+		if spec.Validate(invalid) == nil {
+			t.Errorf("invalid device name accepted: %q", invalid)
+		}
+	}
+}
+
+func TestDeviceRenamePreservesDestinationsAndOtherSettings(t *testing.T) {
+	path := writeExisting(t)
+	before, err := config.OpenDocument(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := runScript(t, path, selectStep("device"), inputStep("旅行电脑"), selectStep("save"), confirmStep(true))
+	after, err := config.OpenDocument(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := before.Config.Clone()
+	want.DeviceName = "旅行电脑"
+	if !reflect.DeepEqual(after.Config, want) {
+		t.Fatal("device rename changed destinations or other settings")
+	}
+	if len(p.inputs) != 1 || p.inputs[0].Initial != "Office-PC" || p.inputs[0].Secret {
+		t.Fatal("rename did not display the existing device name")
+	}
+	if !strings.Contains(p.shown.String(), "设备：旅行电脑") {
+		t.Fatal("configuration summary does not show the new device name")
+	}
+}
+
+func TestCancelledDeviceRenameLeavesOriginalBytes(t *testing.T) {
+	path := writeExisting(t)
+	runScript(t, path, selectStep("device"), inputStep("Unsaved Device"), selectStep("cancel"))
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != existingConfig {
+		t.Fatalf("cancelled device rename altered configuration: %v", err)
+	}
+	if _, err := os.Stat(path + ".bak"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("cancelled device rename wrote a backup")
+	}
+}
+
+func TestExistingConfigWithoutDeviceNamePromptsBeforeMenu(t *testing.T) {
+	path := writeExisting(t)
+	withoutDevice := strings.Replace(existingConfig, "  \"device_name\": \"Office-PC\",\n", "", 1)
+	if err := os.WriteFile(path, []byte(withoutDevice), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := config.OpenDocument(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Config.DeviceName != "" {
+		t.Fatal("fixture unexpectedly contains a device name")
+	}
+	p, _ := runScript(t, path, inputStep("<default>"), selectStep("save"), confirmStep(true))
+	after, err := config.OpenDocument(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := before.Config.Clone()
+	want.DeviceName = config.DefaultDeviceName()
+	if len(p.inputs) != 1 || p.inputs[0].Title != "设备名称" || !reflect.DeepEqual(after.Config, want) {
+		t.Fatal("existing config did not prompt for and preserve the default device name")
+	}
+}
+
+func TestCancelledFirstDevicePromptDoesNotCreateConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	runScript(t, path, promptStep{op: "input", err: ErrCancelled})
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("cancelled device prompt created a configuration")
 	}
 }
 
@@ -257,7 +368,7 @@ func TestToggleDeleteAndSecretClearRequireExplicitChoices(t *testing.T) {
 	runScript(t, path,
 		selectStep("toggle"), selectStep("0"), confirmStep(true),
 		selectStep("delete"), selectStep("0"), confirmStep(false),
-		selectStep("edit"), selectStep("1"), selectStep("keep"), selectStep("clear"), confirmStep(false),
+		selectStep("edit"), selectStep("1"), inputStep("<default>"), selectStep("clear"), confirmStep(false),
 		selectStep("delete"), selectStep("0"), confirmStep(true),
 		selectStep("save"), confirmStep(true),
 	)
@@ -272,11 +383,11 @@ func TestToggleDeleteAndSecretClearRequireExplicitChoices(t *testing.T) {
 
 func TestChangingBearerTokenCanResolveExistingAuthorization(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	data := `{"schema_version":1,"destinations":[{"id":"hook","kind":"webhook","enabled":true,"url":"https://example.invalid/hook","headers":{"Authorization":"custom-secret"}}]}`
+	data := `{"schema_version":1,"device_name":"Office-PC","destinations":[{"id":"hook","kind":"webhook","enabled":true,"url":"https://example.invalid/hook","headers":{"Authorization":"custom-secret"}}]}`
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runScript(t, path, selectStep("edit"), selectStep("0"), selectStep("keep"), inputStep("new-bearer"), selectStep("done"), confirmStep(true), confirmStep(true), selectStep("save"), confirmStep(true))
+	runScript(t, path, selectStep("edit"), selectStep("0"), inputStep("<default>"), inputStep("new-bearer"), selectStep("done"), confirmStep(true), confirmStep(true), selectStep("save"), confirmStep(true))
 	doc, err := config.OpenDocument(path)
 	if err != nil {
 		t.Fatal(err)
@@ -297,8 +408,11 @@ func TestValidationAndBlankSecretReplacement(t *testing.T) {
 	if c.validateID("another_1") != nil {
 		t.Fatal("valid ID rejected")
 	}
-	if validateURL("https://x.invalid:99999/private-secret") == nil || validateURL("${MISSING_URL}") != nil {
-		t.Fatal("URL validation does not handle invalid ports or unresolved references")
+	if validateURL("https://x.invalid:99999/private-secret") == nil || validateURL("${MISSING_URL}") == nil {
+		t.Fatal("URL validation accepted an invalid port or placeholder")
+	}
+	if validateToken("${LEGACY_TOKEN}", true) == nil || validateSecret("${LEGACY_SECRET}") == nil {
+		t.Fatal("credential validation still accepts environment placeholders")
 	}
 	if validateToken("contains space", true) == nil || validatePriority("-1") == nil {
 		t.Fatal("invalid scalar accepted")
@@ -331,6 +445,16 @@ func TestAccessibleEOFAbortsInsteadOfAcceptingDefault(t *testing.T) {
 		if !errors.Is(err, ErrCancelled) {
 			t.Fatalf("input %q: got %v", input, err)
 		}
+	}
+}
+
+func TestAccessibleVisibleInputShowsAndKeepsCurrentURL(t *testing.T) {
+	const address = "https://example.invalid/hook?key=visible-url-key"
+	var output bytes.Buffer
+	p := huhPrompter{input: strings.NewReader("\n"), output: &output, accessible: true}
+	value, err := p.Input(context.Background(), TextInput{Title: "Webhook URL", Initial: address, Validate: validateURL})
+	if err != nil || value != address || !strings.Contains(output.String(), address) {
+		t.Fatalf("accessible input did not show or retain current URL: value=%q, err=%v, output=%q", value, err, output.String())
 	}
 }
 
