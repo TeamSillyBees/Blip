@@ -2,7 +2,7 @@
 
 在 agent 本轮结束或需要你响应时，发送提醒到飞书、企业微信、Gotify 或自定义 webhook。
 
-当前开发版接入 **Codex CLI 与桌面版、Claude Code、Hermes 和 DSH**。用户侧关注两个时机：
+Blip 接入 **Codex CLI 与桌面版、Claude Code、Hermes 和 DSH**。用户侧关注两个时机：
 
 | 提醒 | 触发依据 |
 | --- | --- |
@@ -19,17 +19,17 @@ Codex 结构化提问同时通过 hook 与会话日志采集，按原生调用 I
 
 Blip 支持 npm 安装和直接运行可执行文件。npm 包提供对应平台的预编译 Go 程序，安装和使用不需要 Go 编译器；npm 启动器需要 Node.js 20 或更新版本。配置与通知队列保存在用户目录，升级 npm 包不会将它们写入包安装目录。
 
-npm 包名为 `@teamsillybees/blip`，当前预发行版本使用 `next` 标签。本地安装包的构建、安装与发布说明见 [npm 分发](docs/npm-distribution.md)。安装预发行版：
+npm 包名为 `@teamsillybees/blip`，正式版本使用 `latest` 标签。本地安装包的构建、安装与发布说明见 [npm 分发](docs/npm-distribution.md)。安装正式版：
 
 ```powershell
-npm install -g @teamsillybees/blip@next
+npm install -g @teamsillybees/blip@latest
 blip configure
 blip install codex
 blip start
 blip test
 ```
 
-当前源码版本为 `0.2.0-dev.6`，尚未发布；公共 npm 仍为 `0.2.0-dev.0`。多来源接入、Codex 桌面提问补收、通知配置向导和 Windows 服务可先通过源码或本地安装包使用。
+当前正式版本为 `0.2.0`，包含多来源接入、Codex 桌面提问补收、通知配置向导、Windows 服务和完成通知的最后回复。可用 `npm install -g @teamsillybees/blip@0.2.0` 安装指定版本。
 
 直接运行单文件时，使用下面的构建方式；构建需要 Go 1.25.8 或更新版本，运行生成的程序不需要安装 Go 或 Node.js。
 
@@ -102,7 +102,7 @@ version             显示版本
 
 ## 多来源配置
 
-当前源码已支持多个独立 Codex home、[Claude Code](docs/claude-code.md)、[Hermes](docs/hermes.md) 和 [DSH](docs/dsh.md)，使用内置 harness 适配层。旧配置无需修改；需要新增来源时使用：
+支持多个独立 Codex home、[Claude Code](docs/claude-code.md)、[Hermes](docs/hermes.md) 和 [DSH](docs/dsh.md)，使用内置 harness 适配层。旧配置无需修改；需要新增来源时使用：
 
 ```powershell
 blip sources add --source codex-work --harness codex --home 'D:\Agent Homes\codex-work'

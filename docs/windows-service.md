@@ -2,7 +2,7 @@
 
 从 `0.2.0-dev.2` 起，Blip 可注册为真正的 Windows 服务，由服务控制管理器（SCM）运行。普通 `blip start` 仍只启动当前用户的后台进程；只有显式执行 `blip service install` 才会注册开机自启。
 
-当前源码版本尚未发布到 npm。先从源码构建，或使用对应版本的本地安装包。
+Windows 服务已包含在 npm 正式版 `0.2.0` 中，可使用 `npm install -g @teamsillybees/blip@latest` 安装，也可以从源码构建或使用本地安装包。通过 npm 安装时，下文的 `.\bin\blip.exe` 可替换为 `blip`。
 
 ## 安装与启动
 

@@ -2,7 +2,7 @@
 
 Blip 的 npm 包包含一个轻量 Node.js 启动器，并通过 npm 的可选依赖选择本机平台的 Go 可执行文件。用户不需要 Go 编译器，安装期间不执行下载脚本。命令名称为 `blip`；后台进程和 Codex hook 仍直接运行本地 Go 程序。
 
-当前源码版本为 `0.2.0-dev.6`，尚未发布。公共 npm 的 `@teamsillybees/blip@next` 仍为 `0.2.0-dev.0`；多来源接入、Codex 桌面提问补收和 Windows 服务等后续修改需先使用下面的本地构建版本。
+当前正式版本为 `0.2.0`，使用 `npm install -g @teamsillybees/blip@latest` 安装。正式版本包含多来源接入、Codex 桌面提问补收、Windows 服务和完成通知的最后回复；六个平台原生包与启动器保持同一版本。
 
 ## 本地构建并安装
 
@@ -15,7 +15,7 @@ npm run build:npm:current
 输出位于 `dist/npm/`，包含启动器和当前平台原生包。Windows x64 的本地安装命令为：
 
 ```powershell
-npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.0-dev.6.tgz ./dist/npm/teamsillybees-blip-0.2.0-dev.6.tgz
+npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.0.tgz ./dist/npm/teamsillybees-blip-0.2.0.tgz
 blip version
 blip configure
 ```
@@ -69,12 +69,12 @@ npm run test:npm-install
 
 发布时，根 `package.json` 与 `npm/blip/package.json` 的版本必须一致，启动器的全部原生可选依赖也必须指向同一版本。打包命令将该版本写入 Go 可执行文件，生成 `dist/npm/manifest.json` 记录各 tarball 和完整性哈希。
 
-具备 `@teamsillybees` scope 发布权限后，先发布六个原生包，再发布启动器包。当前是预发行版本，发布时使用单独的 dist-tag，例如：
+具备 `@teamsillybees` scope 发布权限后，先发布六个原生包，再发布启动器包。正式版本使用 `latest` 标签，例如：
 
 ```powershell
-npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.0-dev.6.tgz --access public --tag next
+npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.0.tgz --access public --tag latest
 # 按相同方式发布其余五个原生包，最后发布启动器：
-npm publish ./dist/npm/teamsillybees-blip-0.2.0-dev.6.tgz --access public --tag next
+npm publish ./dist/npm/teamsillybees-blip-0.2.0.tgz --access public --tag latest
 ```
 
-安装已发布的预发行版使用 `npm install -g @teamsillybees/blip@next`。`0.2.0-dev.0` 首次发布后，npm 同时设置了 `latest` 和 `next`；删除 `latest` 的请求返回 HTTP 400，因此当前 `latest` 不代表正式版。正式版本发布后再将 `latest` 指向正式版本。仓库脚本不会自动执行 publish。
+正式版本的 `latest` 指向 `0.2.0`。预发行版本单独使用 `next` 标签；已有的 `0.2.0-dev.0` 仍可通过 `@next` 安装。仓库脚本不会自动执行 publish。
