@@ -91,11 +91,15 @@ func LimitBytes(s string, limit int) string {
 
 func (e Event) Title() string {
 	label := map[Kind]string{TurnCompleted: "完成", ApprovalRequested: "需要输入", InputRequested: "需要输入"}[e.Kind]
-	return label + " · " + LimitBytes(e.Project, 120)
+	title := label + " · " + LimitBytes(e.Project, 120)
+	if e.DeviceName != "" {
+		title += " · " + LimitBytes(e.DeviceName, 128)
+	}
+	return title
 }
 
-// Body contains the conversation title and only the information needed for a
-// response. Full event metadata remains available in the webhook payload.
+// Body contains the conversation title, local event time, and information needed
+// for a response. Full event metadata remains available in the webhook payload.
 func (e Event) Body() string {
 	var text strings.Builder
 	title := strings.TrimSpace(e.SessionTitle)
@@ -103,6 +107,9 @@ func (e Event) Body() string {
 		title = "未命名对话"
 	}
 	text.WriteString(title)
+	if !e.OccurredAt.IsZero() {
+		text.WriteString("\n时间：" + e.OccurredAt.Local().Format("2006-01-02 15:04:05 -07:00"))
+	}
 	switch e.Kind {
 	case InputRequested:
 		for _, question := range e.Questions {

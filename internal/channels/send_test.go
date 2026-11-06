@@ -24,14 +24,18 @@ func TestAllEventKindsReachAllChannelProtocols(t *testing.T) {
 	for _, channel := range []string{"feishu", "wecom", "gotify", "webhook"} {
 		for _, kind := range []event.Kind{event.TurnCompleted, event.ApprovalRequested, event.InputRequested} {
 			t.Run(channel+"/"+string(kind), func(t *testing.T) {
-				wantTitle := "需要输入 · 中文项目"
+				notification := sample(kind)
+				// Delivery happens later; display the event's time, not the signing time.
+				notification.OccurredAt = time.Unix(1599356873, 0).UTC()
+				wantTitle := "需要输入 · 中文项目 · 开发工作站🙂"
 				if kind == event.TurnCompleted {
-					wantTitle = "完成 · 中文项目"
+					wantTitle = "完成 · 中文项目 · 开发工作站🙂"
 				}
+				bodyPrefix := "实现新的通知模板\n时间：" + notification.OccurredAt.Local().Format("2006-01-02 15:04:05 -07:00")
 				wantBody := map[event.Kind]string{
-					event.TurnCompleted:     "实现新的通知模板",
-					event.ApprovalRequested: "实现新的通知模板\n\n请在 Codex 中确认审批。",
-					event.InputRequested:    "实现新的通知模板\n\n选择通知渠道？\nA. 飞书：团队群\nB. Gotify：手机提醒",
+					event.TurnCompleted:     bodyPrefix,
+					event.ApprovalRequested: bodyPrefix + "\n\n请在 Codex 中确认审批。",
+					event.InputRequested:    bodyPrefix + "\n\n选择通知渠道？\nA. 飞书：团队群\nB. Gotify：手机提醒",
 				}[kind]
 				var received bool
 				server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -80,7 +84,7 @@ func TestAllEventKindsReachAllChannelProtocols(t *testing.T) {
 				if channel == "gotify" {
 					target += "/prefix/"
 				}
-				err := sender.Send(context.Background(), config.Destination{Kind: channel, URL: target, Token: "test-token", Secret: "secret", Headers: map[string]string{"X-Source": "test"}}, sample(kind))
+				err := sender.Send(context.Background(), config.Destination{Kind: channel, URL: target, Token: "test-token", Secret: "secret", Headers: map[string]string{"X-Source": "test"}}, notification)
 				if err != nil || !received {
 					t.Fatalf("notification not delivered: %v", err)
 				}
