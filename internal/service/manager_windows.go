@@ -176,7 +176,7 @@ func Install(ctx context.Context, opts InstallOptions) (result error) {
 	// and recovery settings are fully installed.
 	registered, err = manager.CreateService(metadata.Name, metadata.Executable, mgr.Config{
 		DisplayName: "Blip notifications (" + strings.TrimPrefix(metadata.Name, "Blip-") + ")",
-		Description: "Sends local Codex notifications using " + metadata.ConfigPath,
+		Description: "Sends local agent notifications using " + metadata.ConfigPath,
 		StartType:   mgr.StartManual, ErrorControl: mgr.ErrorNormal,
 		ServiceStartName: serviceAccount, SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED,
 	}, serviceArguments(metadata)...)

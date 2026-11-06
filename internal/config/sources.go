@@ -20,6 +20,14 @@ type Source struct {
 	Home         string `json:"home"`
 }
 
+func (s Source) Resolved(configPath string) Source {
+	s.Home = absoluteHome(configPath, s.Home)
+	if s.EventVersion == 0 {
+		s.EventVersion = 2
+	}
+	return s
+}
+
 // Keep an explicit empty v2 list: omitting it would silently lose the user's
 // decision to collect nothing. Legacy documents retain their original shape.
 func (c Config) MarshalJSON() ([]byte, error) {
@@ -143,7 +151,12 @@ func validateSources(c Config) error {
 		}
 		home, err := CanonicalHome(absoluteHome(c.Path, s.Home))
 		if err != nil {
-			return fmt.Errorf("resolve source %q home: %w", s.ID, err)
+			// An inaccessible source is a runtime diagnostic, not a reason to
+			// stop delivery for the entire configuration.
+			home = absoluteHome(c.Path, s.Home)
+			if runtime.GOOS == "windows" {
+				home = strings.ToLower(home)
+			}
 		}
 		key := s.Harness + "\x00" + home
 		if homes[key] {

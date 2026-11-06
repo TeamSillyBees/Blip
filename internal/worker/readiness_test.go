@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log"
 	"os"
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TeamSillyBees/Blip/internal/codex"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/store"
 )
@@ -71,15 +69,40 @@ func TestReadyCallbackRunsOnceAfterStatusIsPublished(t *testing.T) {
 	}
 }
 
-func TestReadyCallbackDoesNotRunOnFailedStartup(t *testing.T) {
+func TestCorruptCheckpointDegradesSourceWithoutFailingStartup(t *testing.T) {
 	dir := t.TempDir()
 	c := config.Config{StateDir: filepath.Join(dir, "state"), CodexHome: filepath.Join(dir, "codex"), PollInterval: "100ms", RequestTimeout: "1s", MaxAttempts: 2}
 	if err := store.WriteFile(filepath.Join(c.StateDir, "rollout-cursors.json"), []byte(`{"initialized":true,"files":null}`)); err != nil {
 		t.Fatal(err)
 	}
 	called := false
-	err := RunWithReady(context.Background(), c, log.New(io.Discard, "", 0), func() { called = true })
-	if !errors.Is(err, codex.ErrCheckpoint) || called {
-		t.Fatalf("failed initialization reported readiness: called=%v, error=%v", called, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := RunWithReady(ctx, c, log.New(io.Discard, "", 0), func() {
+		called = true
+		var status Status
+		if err := store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &status); err != nil || !status.Ready || !status.Degraded || status.Sources[0].ErrorCode != "checkpoint_invalid" {
+			t.Errorf("missing degraded status: %+v %v", status, err)
+		}
+		cancel()
+	})
+	if err != nil || !called {
+		t.Fatalf("source failure stopped common delivery: called=%v, error=%v", called, err)
+	}
+	data, _ := os.ReadFile(filepath.Join(c.StateDir, "rollout-cursors.json"))
+	if string(data) != `{"initialized":true,"files":null}` {
+		t.Fatal("corrupt checkpoint was reset")
+	}
+}
+
+func TestQueueFailureDoesNotReportReady(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	if err := os.WriteFile(state, []byte("not a directory"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	err := RunWithReady(context.Background(), config.Config{StateDir: state}, log.New(io.Discard, "", 0), func() { called = true })
+	if err == nil || called {
+		t.Fatalf("common queue failure reported ready: %v", err)
 	}
 }

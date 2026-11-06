@@ -89,15 +89,36 @@ func permissionTargets(m installMetadata) []permissionTarget {
 	targets := []permissionTarget{
 		{filepath.Dir(m.ConfigPath), readExecute, windows.OBJECT_INHERIT_ACE | windows.NO_PROPAGATE_INHERIT_ACE, true},
 		{m.ConfigPath, windows.FILE_GENERIC_READ, 0, false},
-		{filepath.Join(m.CodexHome, "sessions"), readExecute, inheritChildren, true},
 		{m.StateDir, modify, inheritChildren, true},
+	}
+	if m.Format != 2 {
+		targets = append(targets, permissionTarget{filepath.Join(m.CodexHome, "sessions"), readExecute, inheritChildren, true})
 	}
 	// The title index is optional. Read only an existing regular file; granting
 	// access to CodexHome would also expose credentials and other configuration.
 	indexPath := filepath.Join(m.CodexHome, "session_index.jsonl")
-	if noReparsePoints(indexPath) == nil {
+	if m.Format != 2 && noReparsePoints(indexPath) == nil {
 		if info, err := os.Lstat(indexPath); err == nil && info.Mode().IsRegular() {
 			targets = append(targets, permissionTarget{indexPath, windows.FILE_GENERIC_READ, 0, false})
+		}
+	}
+	if m.Format == 2 {
+		for _, entry := range m.ReadPaths {
+			if entry.Optional {
+				if noReparsePoints(entry.Path) != nil {
+					continue
+				}
+				info, err := os.Lstat(entry.Path)
+				if err != nil || (!entry.Directory && !info.Mode().IsRegular()) || (entry.Directory && !info.IsDir()) {
+					continue
+				}
+			}
+			permissions, inheritance := windows.ACCESS_MASK(windows.FILE_GENERIC_READ), uint32(0)
+			if entry.Directory {
+				permissions = readExecute
+				inheritance = inheritChildren
+			}
+			targets = append(targets, permissionTarget{entry.Path, permissions, inheritance, entry.Directory})
 		}
 	}
 	merged := make(map[string]permissionTarget)

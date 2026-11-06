@@ -1,5 +1,7 @@
 # 自定义 webhook 协议 v1
 
+旧默认 Codex 来源继续使用此协议。新来源使用独立的 [v2 协议](webhook-v2.md)，同一接收端应按 `schema_version` 处理；旧队列不转换格式。
+
 Blip 使用 HTTP POST，`Content-Type: application/json`，任何 HTTP 2xx 表示接收成功，忽略响应正文。不会跟随重定向。可选 Bearer token 或静态请求头，首版没有任意请求体模板。
 
 ```json

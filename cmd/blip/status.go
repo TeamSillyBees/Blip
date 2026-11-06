@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/store"
 	"github.com/TeamSillyBees/Blip/internal/worker"
@@ -73,8 +74,13 @@ func printStatus(c config.Config, output io.Writer) error {
 	var state worker.Status
 	if running {
 		_ = store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &state)
+	} else {
+		state.Sources = []agents.SourceStatus{}
+		for _, source := range c.EffectiveSources() {
+			state.Sources = append(state.Sources, agents.Inspect(c, source))
+		}
 	}
-	return json.NewEncoder(output).Encode(map[string]any{"running": running, "ready": running && state.Ready, "pending": pending, "delivered": delivered, "failed": failed, "quarantined": quarantined, "state_dir": c.StateDir, "destinations": destinations, "collector_error": state.CollectorError})
+	return json.NewEncoder(output).Encode(map[string]any{"running": running, "ready": running && state.Ready, "degraded": state.Degraded, "sources": state.Sources, "pending": pending, "delivered": delivered, "failed": failed, "quarantined": quarantined, "state_dir": c.StateDir, "destinations": destinations, "collector_error": state.CollectorError})
 }
 
 func receiptErrorTime(job store.Job, receipt store.Delivery) time.Time {

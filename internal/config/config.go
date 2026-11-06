@@ -2,7 +2,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -81,13 +80,12 @@ func read(path string, validateChannels bool, defaults RuntimeDefaults) (Config,
 		return c, fmt.Errorf("open configuration: %w", err)
 	}
 	defer file.Close()
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&c); err != nil {
-		return c, fmt.Errorf("invalid configuration JSON: %w", err)
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return c, fmt.Errorf("read configuration: %w", err)
 	}
-	if err = decoder.Decode(new(any)); err != io.EOF {
-		return c, fmt.Errorf("configuration must contain exactly one JSON object")
+	if err = decodeDocument(data, &c); err != nil {
+		return c, err
 	}
 	c.Path = absolute
 	if err := validateStructure(c); err != nil {

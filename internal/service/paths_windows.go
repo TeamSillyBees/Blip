@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/TeamSillyBees/Blip/internal/agents"
+	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/store"
 	"golang.org/x/sys/windows"
 )
@@ -17,13 +19,15 @@ import (
 const metadataFilename = "install.json"
 
 type installMetadata struct {
-	Format     int         `json:"format"`
-	Name       string      `json:"name"`
-	ConfigPath string      `json:"config_path"`
-	Executable string      `json:"executable"`
-	CodexHome  string      `json:"codex_home"`
-	StateDir   string      `json:"state_dir"`
-	Grants     []aclChange `json:"grants,omitempty"`
+	Format     int               `json:"format"`
+	Name       string            `json:"name"`
+	ConfigPath string            `json:"config_path"`
+	Executable string            `json:"executable"`
+	CodexHome  string            `json:"codex_home"`
+	StateDir   string            `json:"state_dir"`
+	Grants     []aclChange       `json:"grants,omitempty"`
+	Sources    []config.Source   `json:"sources,omitempty"`
+	ReadPaths  []agents.ReadPath `json:"read_paths,omitempty"`
 }
 
 func localAbsolute(path string) (string, error) {
@@ -51,7 +55,10 @@ func managedDirectory(configPath string) (string, error) {
 
 func makeInstallMetadata(opts InstallOptions) (installMetadata, string, error) {
 	var m installMetadata
-	paths := []*string{&opts.ConfigPath, &opts.Executable, &opts.CodexHome, &opts.StateDir}
+	paths := []*string{&opts.ConfigPath, &opts.Executable, &opts.StateDir}
+	if opts.Sources == nil || opts.CodexHome != "" {
+		paths = append(paths, &opts.CodexHome)
+	}
 	for _, path := range paths {
 		value, err := localAbsolute(*path)
 		if err != nil {
@@ -66,6 +73,9 @@ func makeInstallMetadata(opts InstallOptions) (installMetadata, string, error) {
 		}
 	}
 	for _, directory := range []string{filepath.Dir(opts.ConfigPath), opts.CodexHome, opts.StateDir} {
+		if directory == "" {
+			continue
+		}
 		if err := rejectBroadDirectory(directory); err != nil {
 			return m, "", err
 		}
@@ -79,6 +89,33 @@ func makeInstallMetadata(opts InstallOptions) (installMetadata, string, error) {
 	}
 	m = installMetadata{Format: 1, Name: Name(opts.ConfigPath), ConfigPath: opts.ConfigPath,
 		Executable: filepath.Join(directory, "blip.exe"), CodexHome: opts.CodexHome, StateDir: opts.StateDir}
+	if opts.Sources != nil {
+		m.Format = 2
+		m.Sources = append([]config.Source{}, opts.Sources...)
+		for i := range m.Sources {
+			s := &m.Sources[i]
+			s.Home, err = localAbsolute(s.Home)
+			if err != nil {
+				return m, "", err
+			}
+			if err = rejectBroadDirectory(s.Home); err != nil {
+				return m, "", err
+			}
+			if !s.Enabled {
+				continue
+			}
+			a, openErr := agents.Builtins().Open(config.Config{Path: opts.ConfigPath, StateDir: opts.StateDir}, *s)
+			if openErr != nil {
+				continue
+			}
+			if reader, ok := a.(agents.FileReader); ok {
+				m.ReadPaths = append(m.ReadPaths, reader.ReadPaths()...)
+			}
+		}
+		if err = validateReadPaths(m); err != nil {
+			return m, "", err
+		}
+	}
 	if samePath(m.Executable, opts.Executable) {
 		return m, "", fmt.Errorf("install from the regular Blip CLI, not the managed service copy")
 	}
@@ -162,14 +199,23 @@ func readMetadata(configPath string) (installMetadata, error) {
 	if err = json.Unmarshal(data, &m); err != nil {
 		return m, fmt.Errorf("invalid service installation record")
 	}
-	if m.Format != 1 || m.Name != Name(abs) || !samePath(m.ConfigPath, abs) || !samePath(m.Executable, filepath.Join(directory, "blip.exe")) {
+	if (m.Format != 1 && m.Format != 2) || m.Name != Name(abs) || !samePath(m.ConfigPath, abs) || !samePath(m.Executable, filepath.Join(directory, "blip.exe")) {
 		return m, fmt.Errorf("service installation record does not belong to this configuration")
 	}
 	for _, path := range []string{m.CodexHome, m.StateDir} {
+		if path == "" && m.Format == 2 {
+			continue
+		}
 		value, pathErr := localAbsolute(path)
 		if pathErr != nil || !samePath(value, path) {
 			return m, fmt.Errorf("invalid paths in service installation record")
 		}
+	}
+	if m.StateDir == "" {
+		return m, fmt.Errorf("missing service state directory")
+	}
+	if err = validateReadPaths(m); err != nil {
+		return m, err
 	}
 	if err = validateRecordedGrants(m); err != nil {
 		return m, err
@@ -180,7 +226,15 @@ func readMetadata(configPath string) (installMetadata, error) {
 func validateRecordedGrants(m installMetadata) error {
 	// Keep the index path valid after removal so uninstall can finish cleaning
 	// an installation whose optional title index no longer exists.
-	allowed := []string{filepath.Dir(m.ConfigPath), m.ConfigPath, filepath.Join(m.CodexHome, "sessions"), filepath.Join(m.CodexHome, "session_index.jsonl"), m.StateDir}
+	allowed := []string{filepath.Dir(m.ConfigPath), m.ConfigPath, m.StateDir}
+	if m.Format != 2 {
+		allowed = append(allowed, filepath.Join(m.CodexHome, "sessions"), filepath.Join(m.CodexHome, "session_index.jsonl"))
+	}
+	if m.Format == 2 {
+		for _, entry := range m.ReadPaths {
+			allowed = append(allowed, entry.Path)
+		}
+	}
 	for _, grant := range m.Grants {
 		valid := false
 		for _, path := range allowed {
@@ -188,6 +242,43 @@ func validateRecordedGrants(m installMetadata) error {
 		}
 		if !valid {
 			return fmt.Errorf("unexpected permission path in service installation record")
+		}
+	}
+	return nil
+}
+
+// Cleanup uses the saved read paths, even when a source or its adapter has been
+// removed. Never broaden a recorded grant to an entire harness home.
+func validateReadPaths(m installMetadata) error {
+	if m.Format == 1 {
+		return nil
+	}
+	for _, s := range m.Sources {
+		if !config.ValidSourceID(s.ID) {
+			return fmt.Errorf("invalid recorded source ID")
+		}
+		home, err := localAbsolute(s.Home)
+		if err != nil || !samePath(home, s.Home) {
+			return fmt.Errorf("invalid recorded source home")
+		}
+		if err = rejectBroadDirectory(home); err != nil {
+			return err
+		}
+	}
+	for _, entry := range m.ReadPaths {
+		path, err := localAbsolute(entry.Path)
+		if err != nil || !samePath(path, entry.Path) {
+			return fmt.Errorf("invalid recorded source read path")
+		}
+		owned := false
+		for _, s := range m.Sources {
+			rel, err := filepath.Rel(s.Home, path)
+			if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+				owned = true
+			}
+		}
+		if !owned {
+			return fmt.Errorf("source read path must be a specific file or subdirectory inside its home")
 		}
 	}
 	return nil

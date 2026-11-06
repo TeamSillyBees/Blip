@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/TeamSillyBees/Blip/internal/codex"
+	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/event"
 	"github.com/TeamSillyBees/Blip/internal/platform"
@@ -36,8 +36,8 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	path := defaultPath
 	root := &cobra.Command{
 		Use:           "blip",
-		Short:         "Send Codex notifications to your messaging channels",
-		Long:          "Blip captures Codex completion, approval and input events locally.\nUse blip configure to set up notification channels interactively.",
+		Short:         "Send agent handoff notifications to your messaging channels",
+		Long:          "Blip captures agent completion, approval and input events locally.\nUse blip configure to set up notification channels interactively.",
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -64,6 +64,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		return fmt.Errorf("configuration path must not be empty")
 	}
 	root.AddCommand(newServiceCommand(&path))
+	root.AddCommand(newSourcesCommand(&path))
 	root.SetVersionTemplate("{{.Version}}\n")
 	for _, entry := range []struct{ name, description string }{
 		{"init", "Create a configuration with disabled example destinations"},
@@ -72,25 +73,46 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		{"run", "Run the notification worker in this terminal"},
 		{"status", "Show readiness and per-destination delivery results"},
 		{"test", "Queue a test notification for enabled destinations"},
-		{"hook", "Capture a Codex hook event from standard input"},
+		{"doctor", "Inspect source installation, capabilities and recent callbacks"},
+		{"hook", "Capture a harness hook event from standard input"},
 	} {
-		root.AddCommand(&cobra.Command{
+		var sourceID string
+		command := &cobra.Command{
 			Use: entry.name, Short: entry.description, Args: cobra.NoArgs, Hidden: entry.name == "hook",
 			RunE: func(command *cobra.Command, _ []string) error {
-				return execute(command.Context(), path, []string{command.Name()}, command.InOrStdin(), command.OutOrStdout())
+				args := []string{command.Name()}
+				if sourceID != "" {
+					args = append(args, sourceID)
+				}
+				return execute(command.Context(), path, args, command.InOrStdin(), command.OutOrStdout())
 			},
-		})
+		}
+		if entry.name == "hook" || entry.name == "doctor" {
+			command.Flags().StringVar(&sourceID, "source", "", "source ID (hook defaults to codex-default)")
+		}
+		root.AddCommand(command)
 	}
 	for _, action := range []string{"install", "uninstall"} {
 		parent := &cobra.Command{Use: action, Short: action + " agent integration", Args: cobra.NoArgs,
 			RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 		}
-		parent.AddCommand(&cobra.Command{
-			Use: "codex", Short: action + " Blip's Codex hooks", Args: cobra.NoArgs,
-			RunE: func(command *cobra.Command, _ []string) error {
-				return execute(command.Context(), path, []string{command.Parent().Name(), "codex"}, command.InOrStdin(), command.OutOrStdout())
-			},
-		})
+		for harness := range agents.Builtins() {
+			var sourceID string
+			child := &cobra.Command{
+				Use: harness, Short: action + " Blip's " + harness + " hooks", Args: cobra.NoArgs,
+				RunE: func(command *cobra.Command, _ []string) error {
+					if sourceID == "" {
+						if harness != "codex" {
+							return fmt.Errorf("specify --source for this harness")
+						}
+						sourceID = config.DefaultSourceID
+					}
+					return execute(command.Context(), path, []string{command.Parent().Name(), harness, sourceID}, command.InOrStdin(), command.OutOrStdout())
+				},
+			}
+			child.Flags().StringVar(&sourceID, "source", "", "configured source ID")
+			parent.AddCommand(child)
+		}
 		root.AddCommand(parent)
 	}
 	var accessible bool
@@ -142,37 +164,67 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		c, err = config.ReadLocal(path)
 	}
 	if err != nil {
+		if command[0] == "hook" {
+			return nil
+		}
 		return err
 	}
 	switch command[0] {
 	case "hook":
-		notification, err := codex.ParseHook(input, time.Now())
-		if err != nil || notification == nil {
-			return err
+		id := config.DefaultSourceID
+		if len(command) > 1 {
+			id = command[1]
 		}
-		notification.DeviceName = c.DeviceName
-		hookCtx, stop := context.WithTimeout(ctx, 3*time.Second)
-		defer stop()
-		notification.SessionTitle = codex.SessionTitle(hookCtx, c.CodexHome, notification.SessionID)
-		_, err = (store.Queue{Dir: c.StateDir}).Enqueue(hookCtx, *notification, worker.DestinationIDs(c))
-		return err // Successful hooks write no stdout and cannot approve/deny a Codex operation.
+		_ = agents.Capture(ctx, c, id, input)
+		return nil // Notification failures cannot approve, deny, or block an agent operation.
 	case "install", "uninstall":
-		if len(command) != 2 || command[1] != "codex" {
-			return fmt.Errorf("use blip install codex or blip uninstall codex")
+		if len(command) < 2 {
+			return fmt.Errorf("specify the harness")
 		}
-		if command[0] == "install" {
-			executable, exeErr := os.Executable()
-			if exeErr != nil {
-				return exeErr
-			}
-			err = codex.Install(ctx, c, executable)
+		id := config.DefaultSourceID
+		if len(command) > 2 {
+			id = command[2]
+		}
+		var source config.Source
+		if command[0] == "uninstall" {
+			source, err = agents.InstalledSource(c, id)
 		} else {
-			err = codex.Uninstall(ctx, c)
+			var ok bool
+			source, ok = c.Source(id)
+			if !ok {
+				err = fmt.Errorf("source %q is not configured", id)
+			}
 		}
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(output, "Codex hooks updated. Review and trust newly installed hooks in Codex; restart existing sessions if needed.")
+		if source.Harness != command[1] {
+			return fmt.Errorf("source %q belongs to %s", id, source.Harness)
+		}
+		adapter, err := agents.Builtins().Open(c, source)
+		if err != nil {
+			return err
+		}
+		installer, ok := adapter.(agents.Installer)
+		if !ok {
+			return fmt.Errorf("source does not support automatic installation")
+		}
+		if command[0] == "install" {
+			if err = agents.Bind(ctx, c, source); err != nil {
+				return err
+			}
+			executable, exeErr := os.Executable()
+			if exeErr != nil {
+				return exeErr
+			}
+			err = installer.Install(ctx, executable)
+		} else {
+			err = installer.Uninstall(ctx)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(output, "%s hooks updated for %s. Review and trust newly installed hooks in the harness; restart existing sessions if needed.\n", source.Harness, source.ID)
 		return nil
 	case "run":
 		if len(c.Enabled()) == 0 {
@@ -208,6 +260,12 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		return nil
 	case "status":
 		return printStatus(c, output)
+	case "doctor":
+		id := ""
+		if len(command) > 1 {
+			id = command[1]
+		}
+		return printDoctor(c, id, output)
 	case "test":
 		now := time.Now().UTC()
 		notification := event.Event{SchemaVersion: 1, ID: event.ID("test", now.Format(time.RFC3339Nano)), Agent: "codex", Kind: event.TurnCompleted, Source: "blip/test", OccurredAt: now, SessionID: "blip-test", SessionTitle: "Blip 测试通知", TurnID: now.Format("20060102T150405.000000000"), Project: "Blip", DeviceName: c.DeviceName, Detail: "这是一条 Blip 测试通知。"}

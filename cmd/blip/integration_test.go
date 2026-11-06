@@ -202,20 +202,30 @@ func TestCLIEndToEnd(t *testing.T) {
 	if bytes.Contains(logData, []byte("local-test-only")) {
 		t.Fatal("credential leaked to logs")
 	}
-	// Invalid recovery state must fail startup promptly, not leave a false success
-	// or make the caller wait out a fixed readiness timeout after the process died.
+	// A damaged source must pause collection without blocking queued delivery.
 	if err := os.WriteFile(filepath.Join(dir, "state", "rollout-cursors.json"), []byte(`{"initialized":true,"files":null}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	startedAt := time.Now()
 	command := exec.Command(binary, "--config", path, "start")
 	output, err := command.CombinedOutput()
-	if err == nil || !bytes.Contains(output, []byte("exited during startup")) {
+	if err != nil || !bytes.Contains(output, []byte("started")) {
 		t.Fatalf("invalid checkpoint startup result: %s %v", output, err)
 	}
 	if time.Since(startedAt) > 4*time.Second {
-		t.Fatal("startup failure was hidden until readiness timeout")
+		t.Fatal("source failure delayed common readiness")
 	}
+	status := call("status")
+	if !bytes.Contains(status, []byte(`"degraded":true`)) || !bytes.Contains(status, []byte(`"checkpoint_invalid"`)) {
+		t.Fatalf("source corruption not reported: %s", status)
+	}
+	call("test")
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("corrupt collector blocked queued notifications")
+	}
+	call("stop")
 }
 
 func waitFor(t *testing.T, condition func() bool) {

@@ -83,6 +83,8 @@ start / stop        启动后台进程 / 请求平稳停止
 service             管理 Windows 服务（install / uninstall / start / stop / status）
 run                 在当前终端运行
 status              显示就绪状态、各目的地投递结果与损坏记录数量
+doctor              显示逐来源安装、能力与最近 hook 回调（可加 --source）
+sources             管理来源（list / migrate / add / enable / disable / remove / event-version）
 test                向所有启用的目的地排入一条测试通知
 version             显示版本
 ```
@@ -95,7 +97,21 @@ version             显示版本
 
 配置变更后执行 `stop`、`start` 生效；使用 Windows 服务时执行 `service stop`、`service start`。`codex_home` 默认按 Codex 的 `CODEX_HOME` 设置定位，未设置时使用 `~/.codex`；也可以在配置中指定。`state_dir` 默认为配置文件同目录下的 `data`。相对路径以配置文件目录为基准。服务安装时保存这些默认目录，后续更换目录需要重新安装服务。
 
-`status` 的 `running` 表示后台进程持有运行锁，`ready` 表示它已完成一次采集检查。`collector_error` 非空时，完成事件采集遇到了问题，请结合 `data/worker.log` 检查；已入队通知仍独立投递。`destinations` 按目的地列出投递数量与最近失败记录的 `last_error`，不输出目的地 URL 或凭据。`stop` 可中断长轮询和等待中的网络请求；未确认送达的通知会保留到下次启动。
+`status` 的 `running` 表示后台进程持有运行锁，`ready` 表示公共队列和各来源初始检查已完成；`degraded` 表示某个来源受限，须查看 `sources` 中的错误码。损坏的来源游标会暂停该来源，其他来源与已入队通知继续工作。`collector_error` 兼容映射默认 Codex 的错误。`destinations` 按目的地列出投递数量与最近失败记录的 `last_error`，不输出目的地 URL 或凭据。`stop` 可中断长轮询和等待中的网络请求；未确认送达的通知会保留到下次启动。
+
+## 多来源配置
+
+当前源码已支持多个独立 Codex home，并建立内置 harness 适配层。旧配置无需修改；需要新增来源时使用：
+
+```powershell
+blip sources add --source codex-work --harness codex --home 'D:\Agent Homes\codex-work'
+blip install codex --source codex-work
+blip doctor --source codex-work
+blip stop
+blip start
+```
+
+这会将配置迁移为 v2 并备份原文件。原来的 `codex-default` 保持事件 v1、旧 ID、游标和安装记录；新来源使用事件 v2，webhook 接收端须支持 `schema_version: 2`。来源 ID 与 home 绑定后不能改作另一个会话空间；停用、移除、卸载都保留历史身份。详见[来源管理与迁移](docs/sources.md)和 [webhook v2](docs/webhook-v2.md)。其他 harness 的可用范围以[兼容性记录](docs/compatibility.md)为准。
 
 ## 通知目的地
 
@@ -154,4 +170,4 @@ npm test
 
 项目约定见[首版需求](docs/requirements.md)、[术语表](GLOSSARY.md)和[架构决策](docs/adr/)。本项目参考 [hellolib/agent-notify](https://github.com/hellolib/agent-notify/tree/ed2842189eff44009a7bbe946b8a1b29bbc983d4) 的适配器、统一消息与渠道发送器分工，代码独立实现。依赖许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-后续扩展见[多 harness 事件接入设计](docs/multi-harness-design.md)，涵盖适配器、来源身份、兼容迁移和分阶段验收；其中的新配置、命令和其他 harness 接入尚未实现。
+后续扩展见[多 harness 事件接入设计](docs/multi-harness-design.md)，涵盖适配器、来源身份、兼容迁移和分阶段验收；公共来源基础已落地，其他 harness 与停止信号关联按文档分批实施。

@@ -36,12 +36,25 @@ func Commands(executable, configPath string) (string, string, error) {
 }
 
 func Install(ctx context.Context, c config.Config, executable string) error {
+	return InstallSource(ctx, c, executable, "")
+}
+
+// InstallSource keeps legacy command text stable; new sources carry an explicit
+// ID and use the state directory selected by the adapter.
+func InstallSource(ctx context.Context, c config.Config, executable, sourceID string) error {
 	if err := hooksEnabled(c.CodexHome); err != nil {
 		return err
 	}
 	command, windows, err := Commands(executable, c.Path)
 	if err != nil {
 		return err
+	}
+	if sourceID != "" {
+		if !config.ValidSourceID(sourceID) {
+			return fmt.Errorf("invalid hook source ID")
+		}
+		command += " --source " + sourceID
+		windows += " --source " + sourceID
 	}
 	return editHooks(ctx, c, []string{command, windows}, true)
 }

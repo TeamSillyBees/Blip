@@ -161,6 +161,9 @@ func (d *Document) validate() error {
 	return nil
 }
 
+// Validate checks a staged edit without publishing it.
+func (d *Document) Validate() error { return d.validate() }
+
 func sameConfig(a, b Config) bool {
 	a.Path, b.Path = "", ""
 	return reflect.DeepEqual(a, b)
@@ -219,6 +222,21 @@ func decodeDocument(data []byte, c *Config) error {
 			case "id", "kind", "enabled", "url", "token", "secret", "headers", "priority":
 			default:
 				return fmt.Errorf("unknown destination field")
+			}
+		}
+	}
+	var sources []map[string]json.RawMessage
+	if raw, ok := fields["sources"]; ok {
+		if err := json.Unmarshal(raw, &sources); err != nil {
+			return fmt.Errorf("invalid sources JSON")
+		}
+	}
+	for _, source := range sources {
+		for name := range source {
+			switch name {
+			case "id", "harness", "event_version", "enabled", "home":
+			default:
+				return fmt.Errorf("unknown source field")
 			}
 		}
 	}

@@ -82,7 +82,7 @@ func manageService(ctx context.Context, action, path string, output io.Writer) e
 		if err != nil {
 			return err
 		}
-		if err = service.Install(ctx, service.InstallOptions{ConfigPath: c.Path, Executable: executable, CodexHome: c.CodexHome, StateDir: c.StateDir}); err != nil {
+		if err = service.Install(ctx, service.InstallOptions{ConfigPath: c.Path, Executable: executable, CodexHome: c.CodexHome, StateDir: c.StateDir, Sources: c.Sources}); err != nil {
 			return err
 		}
 		fmt.Fprintln(output, "Windows service installed:", service.Name(absolute))
@@ -117,7 +117,7 @@ func manageService(ctx context.Context, action, path string, output io.Writer) e
 // Log startup failures in the registered state directory before opening the
 // configuration: a malformed file must still leave a useful service diagnostic.
 func runServiceWorker(ctx context.Context, path string, defaults config.RuntimeDefaults, ready func()) error {
-	if !filepath.IsAbs(path) || !filepath.IsAbs(defaults.StateDir) || !filepath.IsAbs(defaults.CodexHome) {
+	if !filepath.IsAbs(path) || !filepath.IsAbs(defaults.StateDir) || (defaults.CodexHome != "" && !filepath.IsAbs(defaults.CodexHome)) {
 		return fmt.Errorf("service configuration and default directories must be absolute")
 	}
 	if err := os.MkdirAll(defaults.StateDir, 0700); err != nil {
@@ -135,6 +135,9 @@ func runServiceWorker(ctx context.Context, path string, defaults config.RuntimeD
 		// file. Keep potentially sensitive configuration text out of the log.
 		logger.Print("configuration could not be loaded; run blip run with this configuration to inspect the error")
 		return err
+	}
+	if c.SchemaVersion == 1 && defaults.CodexHome == "" {
+		return fmt.Errorf("legacy service configuration requires its original Codex home; reinstall the service")
 	}
 	if len(c.Enabled()) == 0 {
 		err = fmt.Errorf("enable at least one notification destination")

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/channels"
-	"github.com/TeamSillyBees/Blip/internal/codex"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/event"
 	"github.com/TeamSillyBees/Blip/internal/store"
@@ -23,12 +23,13 @@ type Sender interface {
 	Send(context.Context, config.Destination, event.Event) error
 }
 type Dispatcher struct {
-	Queue       store.Queue
-	Sender      Sender
-	MaxAttempts int
-	Timeout     time.Duration
-	DeviceName  string
-	CodexHome   string
+	Queue        store.Queue
+	Sender       Sender
+	MaxAttempts  int
+	Timeout      time.Duration
+	DeviceName   string
+	CodexHome    string
+	ResolveTitle func(context.Context, event.Event) string
 }
 
 // DeliverOnce attempts the oldest due job for just one destination.
@@ -52,7 +53,13 @@ func (d Dispatcher) DeliverOnce(ctx context.Context, destination config.Destinat
 			// Older jobs and chats named after enqueueing can acquire their title
 			// at delivery time. Preserve titles already captured by the event.
 			if notification.SessionTitle == "" {
-				notification.SessionTitle = codex.SessionTitle(ctx, d.CodexHome, notification.SessionID)
+				titleCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
+				if d.ResolveTitle != nil {
+					notification.SessionTitle = d.ResolveTitle(titleCtx, notification)
+				} else if notification.SchemaVersion == 1 && notification.Agent == "codex" {
+					notification.SessionTitle = agents.ResolveTitle(titleCtx, config.Config{CodexHome: d.CodexHome}, notification)
+				}
+				stop()
 			}
 			sendCtx, cancel := context.WithTimeout(ctx, d.Timeout)
 			sendErr := d.Sender.Send(sendCtx, destination, notification)
@@ -96,11 +103,13 @@ func Backoff(attempt int) time.Duration {
 }
 
 type Status struct {
-	Ready          bool      `json:"ready"`
-	PID            int       `json:"pid"`
-	StartedAt      time.Time `json:"started_at"`
-	Heartbeat      time.Time `json:"heartbeat"`
-	CollectorError string    `json:"collector_error,omitempty"`
+	Ready          bool                  `json:"ready"`
+	PID            int                   `json:"pid"`
+	StartedAt      time.Time             `json:"started_at"`
+	Heartbeat      time.Time             `json:"heartbeat"`
+	CollectorError string                `json:"collector_error,omitempty"`
+	Degraded       bool                  `json:"degraded"`
+	Sources        []agents.SourceStatus `json:"sources"`
 }
 
 func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
@@ -110,6 +119,10 @@ func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
 // RunWithReady reports initialization once, after the first completed collection
 // pass and its ready status have been published. The callback must not block.
 func RunWithReady(ctx context.Context, c config.Config, logger *log.Logger, ready func()) error {
+	return runWithRegistry(ctx, c, logger, ready, agents.Builtins())
+}
+
+func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, ready func(), registry agents.Registry) error {
 	if c.DeviceName == "" {
 		c.DeviceName = config.DefaultDeviceName()
 	}
@@ -122,6 +135,9 @@ func RunWithReady(ctx context.Context, c config.Config, logger *log.Logger, read
 		return fmt.Errorf("a Blip worker is already running for this configuration")
 	}
 	defer lock.Unlock()
+	if _, err = queue.Load(); err != nil {
+		return err
+	}
 	stopPath := filepath.Join(c.StateDir, "stop")
 	if err = os.Remove(stopPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -131,26 +147,40 @@ func RunWithReady(ctx context.Context, c config.Config, logger *log.Logger, read
 	stopDone := make(chan struct{})
 	go func() { defer close(stopDone); watchStop(ctx, stopPath, cancel, logger) }()
 	defer func() { cancel(); <-stopDone }()
-	status := Status{PID: os.Getpid(), StartedAt: time.Now().UTC(), Heartbeat: time.Now().UTC()}
+	status := Status{PID: os.Getpid(), StartedAt: time.Now().UTC(), Heartbeat: time.Now().UTC(), Sources: []agents.SourceStatus{}}
+	sources := c.EffectiveSources()
+	for _, source := range sources {
+		status.Sources = append(status.Sources, agents.Inspect(c, source))
+		status.Sources[len(status.Sources)-1].State = "checking"
+	}
 	if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
 		return err
 	}
-	dispatcher := Dispatcher{Queue: queue, Sender: channels.New(c.TimeoutDuration()), MaxAttempts: c.MaxAttempts, Timeout: c.TimeoutDuration(), DeviceName: c.DeviceName, CodexHome: c.CodexHome}
+	dispatcher := Dispatcher{Queue: queue, Sender: channels.New(c.TimeoutDuration()), MaxAttempts: c.MaxAttempts, Timeout: c.TimeoutDuration(), DeviceName: c.DeviceName, ResolveTitle: func(ctx context.Context, e event.Event) string { return agents.ResolveTitle(ctx, c, e) }}
+	fatal := make(chan error, 1)
 	var group sync.WaitGroup
 	for _, destination := range c.Enabled() {
 		group.Add(1)
 		go func(destination config.Destination) {
 			defer group.Done()
-			interval := c.PollDuration()
-			if destination.Kind == "wecom" && interval < 3100*time.Millisecond {
-				interval = 3100 * time.Millisecond
-			}
-			if destination.Kind == "feishu" && interval < 650*time.Millisecond {
-				interval = 650 * time.Millisecond
-			}
 			for {
-				if _, sendErr := dispatcher.DeliverOnce(ctx, destination, time.Now().UTC()); sendErr != nil && ctx.Err() == nil {
-					logger.Printf("delivery state error for destination %q: %v", destination.ID, sendErr)
+				attempted, sendErr := dispatcher.DeliverOnce(ctx, destination, time.Now().UTC())
+				if sendErr != nil && ctx.Err() == nil {
+					select {
+					case fatal <- fmt.Errorf("delivery state: %w", sendErr):
+					default:
+					}
+					return
+				}
+				interval := c.PollDuration()
+				if interval <= 0 || interval > 250*time.Millisecond {
+					interval = 250 * time.Millisecond
+				}
+				if attempted && destination.Kind == "wecom" {
+					interval = 3100 * time.Millisecond
+				}
+				if attempted && destination.Kind == "feishu" {
+					interval = 650 * time.Millisecond
 				}
 				timer := time.NewTimer(interval)
 				select {
@@ -163,35 +193,45 @@ func RunWithReady(ctx context.Context, c config.Config, logger *log.Logger, read
 		}(destination)
 	}
 	defer func() { cancel(); group.Wait() }()
-	collector := codex.Collector{SessionsDir: filepath.Join(c.CodexHome, "sessions"), StatePath: filepath.Join(c.StateDir, "rollout-cursors.json")}
-	destinations := DestinationIDs(c)
-	ticker := time.NewTicker(c.PollDuration())
+	updates := make(chan sourceUpdate, len(sources)*2+1)
+	for index, source := range sources {
+		group.Add(1)
+		go func() { defer group.Done(); collectSource(ctx, c, source, index, registry, queue, updates) }()
+	}
+	checked := make([]bool, len(sources))
+	interval := c.PollDuration()
+	if interval <= 0 || interval > time.Second {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	lastPrune := time.Time{}
 	lastQuarantined := 0
 	for {
 		status.CollectorError = ""
-		if err = collector.Poll(ctx, func(e event.Event) error {
-			e.DeviceName = c.DeviceName
-			e.SessionTitle = codex.SessionTitle(ctx, c.CodexHome, e.SessionID)
-			_, err := queue.Enqueue(ctx, e, destinations)
-			return err
-		}); err != nil && ctx.Err() == nil {
-			if errors.Is(err, codex.ErrCheckpoint) {
-				return err
+		status.Degraded = false
+		status.Ready = true
+		for i := range status.Sources {
+			s := &status.Sources[i]
+			agents.RefreshHookDiagnostic(c, s)
+			if !checked[i] {
+				status.Ready = false
 			}
-			logger.Printf("collector: %v", err)
-			status.CollectorError = err.Error()
+			if s.ErrorCode != "" {
+				status.Degraded = true
+				if s.ID == config.DefaultSourceID {
+					status.CollectorError = s.ErrorCode
+				}
+			}
 		}
 		if ctx.Err() != nil {
 			return nil
 		}
 		status.Heartbeat = time.Now().UTC()
-		status.Ready = true
 		if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
 			return err
 		}
-		if ready != nil {
+		if ready != nil && status.Ready {
 			ready()
 			ready = nil
 		}
@@ -217,6 +257,21 @@ func RunWithReady(ctx context.Context, c config.Config, logger *log.Logger, read
 		select {
 		case <-ctx.Done():
 			return nil
+		case err = <-fatal:
+			return err
+		case update := <-updates:
+			checked[update.index] = true
+			s := &status.Sources[update.index]
+			s.State, s.ErrorCode = update.state, update.code
+			if update.eventAt != nil {
+				s.LastEventAt = update.eventAt
+			}
+			if update.err != nil && ctx.Err() == nil {
+				logger.Printf("source %q: %v", s.ID, update.err)
+			}
+			if update.fatal != nil {
+				return update.fatal
+			}
 		case <-ticker.C:
 		}
 	}

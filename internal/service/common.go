@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/TeamSillyBees/Blip/internal/config"
 )
 
 var ErrUnsupported = errors.New("Windows services are only supported on Windows")
@@ -17,6 +19,7 @@ type InstallOptions struct {
 	Executable string
 	CodexHome  string
 	StateDir   string
+	Sources    []config.Source
 }
 
 type Status struct {
