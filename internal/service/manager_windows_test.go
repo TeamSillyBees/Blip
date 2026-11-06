@@ -200,6 +200,135 @@ func allowedSIDEntries(t *testing.T, path, sid string, explicitOnly bool) int {
 	return count
 }
 
+func TestServiceTitleIndexPermissionIsOptionalAndNarrow(t *testing.T) {
+	for _, kind := range []string{"absent", "regular file", "directory", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			directory := t.TempDir()
+			m := installMetadata{ConfigPath: filepath.Join(directory, "blip", "config.json"), CodexHome: filepath.Join(directory, "codex"), StateDir: filepath.Join(directory, "state")}
+			if err := os.Mkdir(m.CodexHome, 0700); err != nil {
+				t.Fatal(err)
+			}
+			indexPath := filepath.Join(m.CodexHome, "session_index.jsonl")
+			switch kind {
+			case "regular file":
+				if err := os.WriteFile(indexPath, []byte("test title index"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				if err := os.Mkdir(indexPath, 0700); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				target := filepath.Join(directory, "private.jsonl")
+				if err := os.WriteFile(target, []byte("private"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, indexPath); err != nil {
+					t.Skipf("creating symlinks is unavailable: %v", err)
+				}
+			}
+			indexTargets := 0
+			for _, target := range permissionTargets(m) {
+				for _, forbidden := range []string{m.CodexHome, filepath.Join(m.CodexHome, "auth.json"), filepath.Join(m.CodexHome, "config.toml")} {
+					if samePath(target.path, forbidden) {
+						t.Fatalf("unexpected broad or private Codex grant: %+v", target)
+					}
+				}
+				if samePath(target.path, indexPath) {
+					indexTargets++
+					if target.permissions != windows.FILE_GENERIC_READ || target.inheritance != 0 || target.directory {
+						t.Fatalf("title index grant is not limited to file read: %+v", target)
+					}
+				}
+			}
+			want := 0
+			if kind == "regular file" {
+				want = 1
+			}
+			if indexTargets != want {
+				t.Fatalf("got %d title index grants, want %d", indexTargets, want)
+			}
+			if kind == "absent" {
+				if _, err := os.Lstat(indexPath); !os.IsNotExist(err) {
+					t.Fatalf("optional absent index was created: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceTitleIndexGrantValidationAndCleanup(t *testing.T) {
+	directory := t.TempDir()
+	m := installMetadata{ConfigPath: filepath.Join(directory, "blip", "config.json"), CodexHome: filepath.Join(directory, "codex"), StateDir: filepath.Join(directory, "state")}
+	if err := os.Mkdir(m.CodexHome, 0700); err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(m.CodexHome, "session_index.jsonl")
+	privatePaths := []string{filepath.Join(m.CodexHome, "auth.json"), filepath.Join(m.CodexHome, "config.toml")}
+	for _, path := range append([]string{indexPath}, privatePaths...) {
+		if err := os.WriteFile(path, []byte("preserve this data"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sid, err := windows.StringToSid("S-1-5-80-304021-304022-304023-304024-304025")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSID, err := windows.StringToSid("S-1-5-80-404021-404022-404023-404024-404025")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded aclChange
+	for _, target := range permissionTargets(m) {
+		if samePath(target.path, indexPath) {
+			recorded, err = grantPermission(target, sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if recorded.SID != sid.String() || allowedSIDEntries(t, indexPath, sid.String(), true) != 1 {
+		t.Fatal("missing explicit title index read grant")
+	}
+	for _, path := range append([]string{m.CodexHome}, privatePaths...) {
+		if allowedSIDEntries(t, path, sid.String(), false) != 0 {
+			t.Fatalf("title index permission exposed %s", path)
+		}
+	}
+	m.Grants = []aclChange{recorded}
+	if err := validateRecordedGrants(m); err != nil {
+		t.Fatalf("title index grant rejected: %v", err)
+	}
+	for _, path := range append([]string{m.CodexHome, indexPath + ".private", filepath.Join(indexPath, "child")}, privatePaths...) {
+		invalid := m
+		invalid.Grants = []aclChange{{Path: path, SID: sid.String()}}
+		if validateRecordedGrants(invalid) == nil {
+			t.Fatalf("unexpected recorded permission accepted: %s", path)
+		}
+	}
+	if _, err := grantPermission(permissionTarget{indexPath, windows.FILE_GENERIC_READ, 0, false}, otherSID); err != nil {
+		t.Fatal(err)
+	}
+	if err := restorePermission(recorded); err != nil {
+		t.Fatal(err)
+	}
+	if allowedSIDEntries(t, indexPath, sid.String(), false) != 0 || allowedSIDEntries(t, indexPath, otherSID.String(), true) != 1 {
+		t.Fatal("title index cleanup left service access or removed unrelated access")
+	}
+	if data, err := os.ReadFile(indexPath); err != nil || string(data) != "preserve this data" {
+		t.Fatalf("cleanup changed the title index: %q %v", data, err)
+	}
+	if err := os.Remove(indexPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRecordedGrants(m); err != nil {
+		t.Fatalf("removed optional index made installation record invalid: %v", err)
+	}
+	if err := restorePermission(recorded); err != nil {
+		t.Fatalf("cleanup failed for removed optional index: %v", err)
+	}
+}
+
 func TestServicePermissionsSurviveAtomicConfigReplacementAndCleanUp(t *testing.T) {
 	sid, err := windows.StringToSid("S-1-5-80-104021-104022-104023-104024-104025")
 	if err != nil {

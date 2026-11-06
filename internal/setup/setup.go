@@ -146,7 +146,7 @@ func (c *controller) editDeviceName(ctx context.Context) error {
 		initial = config.DefaultDeviceName()
 	}
 	name, err := c.prompts.Input(ctx, TextInput{
-		Title: "设备名称", Description: "用于在通知中识别这台设备。", Initial: initial,
+		Title: "设备名称", Description: "保存在通知事件中，供自定义 Webhook 区分设备。", Initial: initial,
 		Validate: func(value string) error {
 			if err := config.ValidateDeviceName(value); err != nil {
 				return errors.New("设备名称须为 1–128 个字符，不能含首尾空格或控制字符")

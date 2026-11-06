@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -70,6 +71,44 @@ func TestDeviceNamesSurviveQueuedRetriesAndLegacyRecords(t *testing.T) {
 			}
 			if jobs[0].Event.DeviceName != entry.stored || jobs[0].Deliveries[0].DeliveredAt == nil {
 				t.Fatal("delivery rewrote captured metadata or failed to record successful retry")
+			}
+		})
+	}
+}
+
+func TestSessionTitlesPreserveCapturedNamesAndFillLegacyJobs(t *testing.T) {
+	for _, stored := range []string{"入队时的对话名", ""} {
+		t.Run(stored, func(t *testing.T) {
+			ctx := context.Background()
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "session_index.jsonl"), []byte("{\"id\":\"session\",\"thread_name\":\"当前对话名\"}\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			q := store.Queue{Dir: t.TempDir()}
+			now := time.Now().UTC()
+			notification := event.Event{SchemaVersion: 1, ID: event.ID("title", stored), Agent: "codex", Kind: event.TurnCompleted, OccurredAt: now, SessionID: "session", SessionTitle: stored, TurnID: "turn"}
+			if _, err := q.Enqueue(ctx, notification, []string{"destination"}); err != nil {
+				t.Fatal(err)
+			}
+			sender := &recordingSender{}
+			dispatcher := Dispatcher{Queue: q, Sender: sender, CodexHome: home, MaxAttempts: 2, Timeout: time.Second}
+			for _, due := range []time.Time{now.Add(time.Second), now.Add(time.Minute)} {
+				if sent, err := dispatcher.DeliverOnce(ctx, config.Destination{ID: "destination"}, due); !sent || err != nil {
+					t.Fatalf("send failed: sent=%v error=%v", sent, err)
+				}
+			}
+			want := stored
+			if want == "" {
+				want = "当前对话名"
+			}
+			for _, sent := range sender.notifications {
+				if sent.SessionTitle != want {
+					t.Fatalf("title=%q, want %q", sent.SessionTitle, want)
+				}
+			}
+			jobs, err := q.Load()
+			if err != nil || len(jobs) != 1 || jobs[0].Event.SessionTitle != stored {
+				t.Fatalf("delivery changed stored title: %v", err)
 			}
 		})
 	}

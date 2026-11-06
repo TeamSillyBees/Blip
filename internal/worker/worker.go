@@ -28,6 +28,7 @@ type Dispatcher struct {
 	MaxAttempts int
 	Timeout     time.Duration
 	DeviceName  string
+	CodexHome   string
 }
 
 // DeliverOnce attempts the oldest due job for just one destination.
@@ -42,13 +43,18 @@ func (d Dispatcher) DeliverOnce(ctx context.Context, destination config.Destinat
 			if receipt.DestinationID != destination.ID || receipt.DeliveredAt != nil || receipt.Failed || receipt.NextAttempt.After(now) {
 				continue
 			}
-			sendCtx, cancel := context.WithTimeout(ctx, d.Timeout)
 			notification := job.Event
 			// Records created before device names were supported have no label.
 			// Keep names already captured at enqueue time unchanged across retries.
 			if notification.DeviceName == "" {
 				notification.DeviceName = d.DeviceName
 			}
+			// Older jobs and chats named after enqueueing can acquire their title
+			// at delivery time. Preserve titles already captured by the event.
+			if notification.SessionTitle == "" {
+				notification.SessionTitle = codex.SessionTitle(ctx, d.CodexHome, notification.SessionID)
+			}
+			sendCtx, cancel := context.WithTimeout(ctx, d.Timeout)
 			sendErr := d.Sender.Send(sendCtx, destination, notification)
 			cancel()
 			finishedAt := time.Now().UTC()
@@ -129,7 +135,7 @@ func RunWithReady(ctx context.Context, c config.Config, logger *log.Logger, read
 	if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
 		return err
 	}
-	dispatcher := Dispatcher{Queue: queue, Sender: channels.New(c.TimeoutDuration()), MaxAttempts: c.MaxAttempts, Timeout: c.TimeoutDuration(), DeviceName: c.DeviceName}
+	dispatcher := Dispatcher{Queue: queue, Sender: channels.New(c.TimeoutDuration()), MaxAttempts: c.MaxAttempts, Timeout: c.TimeoutDuration(), DeviceName: c.DeviceName, CodexHome: c.CodexHome}
 	var group sync.WaitGroup
 	for _, destination := range c.Enabled() {
 		group.Add(1)
@@ -167,6 +173,7 @@ func RunWithReady(ctx context.Context, c config.Config, logger *log.Logger, read
 		status.CollectorError = ""
 		if err = collector.Poll(ctx, func(e event.Event) error {
 			e.DeviceName = c.DeviceName
+			e.SessionTitle = codex.SessionTitle(ctx, c.CodexHome, e.SessionID)
 			_, err := queue.Enqueue(ctx, e, destinations)
 			return err
 		}); err != nil && ctx.Err() == nil {

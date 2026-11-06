@@ -74,7 +74,7 @@ func (s *Sender) Send(ctx context.Context, destination config.Destination, notif
 		if priority == 0 {
 			priority = 5
 		}
-		payload = map[string]any{"title": notification.Title(), "message": event.LimitBytes(notification.Text(), 16000), "priority": priority}
+		payload = map[string]any{"title": notification.Title(), "message": event.LimitBytes(notification.Body(), 16000), "priority": priority}
 	case "webhook":
 		payload = notification
 	default:

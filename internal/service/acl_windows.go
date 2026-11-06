@@ -92,6 +92,14 @@ func permissionTargets(m installMetadata) []permissionTarget {
 		{filepath.Join(m.CodexHome, "sessions"), readExecute, inheritChildren, true},
 		{m.StateDir, modify, inheritChildren, true},
 	}
+	// The title index is optional. Read only an existing regular file; granting
+	// access to CodexHome would also expose credentials and other configuration.
+	indexPath := filepath.Join(m.CodexHome, "session_index.jsonl")
+	if noReparsePoints(indexPath) == nil {
+		if info, err := os.Lstat(indexPath); err == nil && info.Mode().IsRegular() {
+			targets = append(targets, permissionTarget{indexPath, windows.FILE_GENERIC_READ, 0, false})
+		}
+	}
 	merged := make(map[string]permissionTarget)
 	for _, target := range targets {
 		key := strings.ToLower(filepath.Clean(target.path))

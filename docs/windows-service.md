@@ -53,7 +53,7 @@ blip service uninstall   # 停止并删除服务，取消开机自启
 
 服务以 `NT AUTHORITY\LocalService` 运行，无需保存 Windows 密码；它是 Windows 内置的低权限账户。[Microsoft LocalService 说明](https://learn.microsoft.com/en-us/windows/win32/services/localservice-account)
 
-安装器为此服务启用独立服务 SID，并只向该身份授予所需权限：读取配置及 Codex `sessions`，修改队列目录。原有用户权限保留，普通用户的 Codex hook 仍能入队。配置目录的读取权限支持向导原子替换配置文件；不会把整个用户目录授权给服务。
+安装器为此服务启用独立服务 SID，并只向该身份授予所需权限：读取配置及 Codex `sessions`，修改队列目录。安装时若存在 `session_index.jsonl`，另外授予该文件的读取权限，以显示对话名称；不会授权读取整个 Codex 目录。原有用户权限保留，普通用户的 Codex hook 仍能入队。配置目录的读取权限支持向导原子替换配置文件；不会把整个用户目录授权给服务。
 
 配置、队列和 Codex 目录在安装时解析为绝对路径。服务仍读取原配置文件；缺省目录使用安装时记录的值，不会改用 LocalService 的个人目录。服务模式要求本地磁盘中的独立配置和数据目录，不支持网络路径或相关路径中的目录联接、符号链接。
 
@@ -64,6 +64,8 @@ blip service uninstall   # 停止并删除服务，取消开机自启
 3. 执行 `blip service install`、`blip service start`。
 
 修改渠道或设备名称后，停止并启动服务即可加载。更换配置文件、`codex_home` 或 `state_dir` 的位置时，先卸载原服务，再修改设置并重新安装，以更新路径和访问权限。
+
+从旧版本升级到精简通知模板时，同样需要卸载后重新安装服务以更新程序副本及名称索引权限。名称索引不存在或因替换文件而不可读时，通知会显示“未命名对话”；索引创建后可重新安装服务来授予读取权限。
 
 ## 恢复与诊断
 

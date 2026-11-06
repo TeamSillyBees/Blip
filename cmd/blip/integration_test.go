@@ -60,6 +60,11 @@ func TestCLIEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	const deviceName = "开发电脑 A"
+	const sessionTitle = "实现通知模板"
+	indexPath := filepath.Join(home, "session_index.jsonl")
+	if err := os.WriteFile(indexPath, []byte(`{"id":"root","thread_name":"`+sessionTitle+`","updated_at":"2026-11-06T00:00:00Z"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	settings := map[string]any{"schema_version": 1, "device_name": deviceName, "codex_home": home, "state_dir": filepath.Join(dir, "state"), "poll_interval": "100ms", "request_timeout": "1s", "max_attempts": 2, "destinations": []any{map[string]any{"id": "loopback", "kind": "webhook", "enabled": true, "url": server.URL, "token": "local-test-only"}}}
 	data, _ := json.Marshal(settings)
 	if err := os.WriteFile(path, data, 0600); err != nil {
@@ -120,6 +125,9 @@ func TestCLIEndToEnd(t *testing.T) {
 			if notification.DeviceName != deviceName {
 				t.Fatalf("%s notification lost configured device name: %q", notification.Kind, notification.DeviceName)
 			}
+			if notification.SessionTitle != sessionTitle {
+				t.Fatalf("%s notification lost conversation title: %q", notification.Kind, notification.SessionTitle)
+			}
 			if notification.TurnID == "historical" {
 				t.Fatal("historical completion replayed")
 			}
@@ -139,7 +147,11 @@ func TestCLIEndToEnd(t *testing.T) {
 	})
 	call("stop")
 	question = string(bytes.ReplaceAll([]byte(question), []byte("call-1"), []byte("call-2")))
-	invokeHook(question)           // Offline hook input remains durably queued.
+	invokeHook(question) // Offline hook input remains durably queued with its title.
+	const renamedTitle = "精简通知内容"
+	if err := os.WriteFile(indexPath, []byte(`{"id":"root","thread_name":"`+renamedTitle+`","updated_at":"2026-11-06T01:00:00Z"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	appendRollout(complete("two")) // The persisted cursor must catch up on restart.
 	call("start")
 	for i := 0; i < 2; i++ {
@@ -147,6 +159,13 @@ func TestCLIEndToEnd(t *testing.T) {
 		case notification := <-received:
 			if notification.DeviceName != deviceName {
 				t.Fatalf("restart lost configured device name: %q", notification.DeviceName)
+			}
+			wantTitle := renamedTitle
+			if notification.Kind == event.InputRequested {
+				wantTitle = sessionTitle
+			}
+			if notification.SessionTitle != wantTitle {
+				t.Fatalf("%s restart title = %q, want %q", notification.Kind, notification.SessionTitle, wantTitle)
 			}
 			if notification.TurnID == "historical" {
 				t.Fatal("restart replayed history")
@@ -163,7 +182,7 @@ func TestCLIEndToEnd(t *testing.T) {
 	call("test")
 	select {
 	case notification := <-received:
-		if notification.Source != "blip/test" || notification.DeviceName != deviceName {
+		if notification.Source != "blip/test" || notification.DeviceName != deviceName || notification.SessionTitle != "Blip 测试通知" {
 			t.Fatalf("test notification lost its source or device name: %+v", notification)
 		}
 	case <-time.After(10 * time.Second):

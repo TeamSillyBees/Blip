@@ -33,6 +33,7 @@ type Event struct {
 	Source        string     `json:"source"`
 	OccurredAt    time.Time  `json:"occurred_at"`
 	SessionID     string     `json:"session_id"`
+	SessionTitle  string     `json:"session_title,omitempty"`
 	TurnID        string     `json:"turn_id"`
 	RequestID     string     `json:"request_id,omitempty"`
 	Project       string     `json:"project"`
@@ -89,29 +90,39 @@ func LimitBytes(s string, limit int) string {
 }
 
 func (e Event) Title() string {
-	label := map[Kind]string{TurnCompleted: "本轮完成", ApprovalRequested: "审批申请", InputRequested: "需要输入"}[e.Kind]
-	title := "Blip · " + label
-	if e.DeviceName != "" {
-		title += " · " + LimitBytes(e.DeviceName, 128)
-	}
-	return title + " · " + LimitBytes(e.Project, 120)
+	label := map[Kind]string{TurnCompleted: "完成", ApprovalRequested: "需要输入", InputRequested: "需要输入"}[e.Kind]
+	return label + " · " + LimitBytes(e.Project, 120)
 }
 
-func (e Event) Text() string {
+// Body contains the conversation title and only the information needed for a
+// response. Full event metadata remains available in the webhook payload.
+func (e Event) Body() string {
 	var text strings.Builder
-	text.WriteString(e.Title())
-	if e.DeviceName != "" {
-		text.WriteString("\n设备：" + e.DeviceName)
+	title := strings.TrimSpace(e.SessionTitle)
+	if title == "" {
+		title = "未命名对话"
 	}
-	fmt.Fprintf(&text, "\n项目：%s\n会话：%s\n轮次：%s\n时间：%s", e.Project, e.SessionID, e.TurnID, e.OccurredAt.Format(time.RFC3339))
-	if e.Detail != "" {
-		text.WriteString("\n\n" + e.Detail)
-	}
-	for _, question := range e.Questions {
-		text.WriteString("\n\n" + question.Text)
-		for _, option := range question.Options {
-			text.WriteString("\n• " + option)
+	text.WriteString(title)
+	switch e.Kind {
+	case InputRequested:
+		for _, question := range e.Questions {
+			text.WriteString("\n\n" + question.Text)
+			for index, option := range question.Options {
+				fmt.Fprintf(&text, "\n%s. %s", optionLetter(index), option)
+			}
 		}
+	case ApprovalRequested:
+		text.WriteString("\n\n请在 Codex 中确认审批。")
 	}
 	return text.String()
+}
+
+func (e Event) Text() string { return e.Title() + "\n" + e.Body() }
+
+func optionLetter(index int) string {
+	label := ""
+	for index++; index > 0; index = (index - 1) / 26 {
+		label = string(rune('A'+(index-1)%26)) + label
+	}
+	return label
 }

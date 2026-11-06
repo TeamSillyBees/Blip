@@ -12,6 +12,7 @@ Blip 使用 HTTP POST，`Content-Type: application/json`，任何 HTTP 2xx 表�
   "source": "codex/hooks",
   "occurred_at": "2026-10-25T09:30:00Z",
   "session_id": "session-id",
+  "session_title": "实现通知模板",
   "turn_id": "turn-id",
   "request_id": "call-id",
   "project": "Blip",
@@ -24,6 +25,8 @@ Blip 使用 HTTP POST，`Content-Type: application/json`，任何 HTTP 2xx 表�
 ```
 
 `kind` 为 `turn_completed`、`approval_requested`、`input_requested`。`source` 为 `codex/hooks` 或 `codex/rollout`；手动测试通知使用 `blip/test`。`device_name` 为配置中的设备名称，默认当前计算机名；这是协议 v1 新增的可选字段，旧记录可能缺省。`request_id`、`cwd`、`detail`、`questions` 在没有内容时可以缺省；发生时间采用 RFC 3339 UTC。
+
+`session_title` 是可选的对话名称，读取 Codex 本地名称索引；没有名称或无法读取时省略。新事件保留入队时的名称，旧事件在发送前尝试补齐。默认渠道的精简模板不改变此结构化协议，设备名、标识及详情字段继续保留。
 
 每次重试携带相同的 `id` 和 `X-Blip-Event-Id` 请求头。接收端应先持久接收，再返回 2xx，并按事件标识去重。Blip 的本地去重与外部接收不是一个事务，存在重复投递窗口。
 

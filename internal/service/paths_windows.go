@@ -171,15 +171,24 @@ func readMetadata(configPath string) (installMetadata, error) {
 			return m, fmt.Errorf("invalid paths in service installation record")
 		}
 	}
-	allowed := []string{filepath.Dir(m.ConfigPath), m.ConfigPath, filepath.Join(m.CodexHome, "sessions"), m.StateDir}
+	if err = validateRecordedGrants(m); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+func validateRecordedGrants(m installMetadata) error {
+	// Keep the index path valid after removal so uninstall can finish cleaning
+	// an installation whose optional title index no longer exists.
+	allowed := []string{filepath.Dir(m.ConfigPath), m.ConfigPath, filepath.Join(m.CodexHome, "sessions"), filepath.Join(m.CodexHome, "session_index.jsonl"), m.StateDir}
 	for _, grant := range m.Grants {
 		valid := false
 		for _, path := range allowed {
 			valid = valid || samePath(grant.Path, path)
 		}
 		if !valid {
-			return m, fmt.Errorf("unexpected permission path in service installation record")
+			return fmt.Errorf("unexpected permission path in service installation record")
 		}
 	}
-	return m, nil
+	return nil
 }

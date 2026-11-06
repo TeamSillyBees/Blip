@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.2.0-dev.2"
+var version = "0.2.0-dev.3"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -153,6 +153,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		notification.DeviceName = c.DeviceName
 		hookCtx, stop := context.WithTimeout(ctx, 3*time.Second)
 		defer stop()
+		notification.SessionTitle = codex.SessionTitle(hookCtx, c.CodexHome, notification.SessionID)
 		_, err = (store.Queue{Dir: c.StateDir}).Enqueue(hookCtx, *notification, worker.DestinationIDs(c))
 		return err // Successful hooks write no stdout and cannot approve/deny a Codex operation.
 	case "install", "uninstall":
@@ -209,7 +210,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		return printStatus(c, output)
 	case "test":
 		now := time.Now().UTC()
-		notification := event.Event{SchemaVersion: 1, ID: event.ID("test", now.Format(time.RFC3339Nano)), Agent: "codex", Kind: event.TurnCompleted, Source: "blip/test", OccurredAt: now, SessionID: "blip-test", TurnID: now.Format("20060102T150405.000000000"), Project: "Blip", DeviceName: c.DeviceName, Detail: "这是一条 Blip 测试通知。"}
+		notification := event.Event{SchemaVersion: 1, ID: event.ID("test", now.Format(time.RFC3339Nano)), Agent: "codex", Kind: event.TurnCompleted, Source: "blip/test", OccurredAt: now, SessionID: "blip-test", SessionTitle: "Blip 测试通知", TurnID: now.Format("20060102T150405.000000000"), Project: "Blip", DeviceName: c.DeviceName, Detail: "这是一条 Blip 测试通知。"}
 		added, err := (store.Queue{Dir: c.StateDir}).Enqueue(ctx, notification, worker.DestinationIDs(c))
 		if err != nil {
 			return err
