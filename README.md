@@ -28,7 +28,7 @@ blip start
 blip test
 ```
 
-当前源码版本为 `0.2.0-dev.1`，尚未发布；公共 npm 仍为 `0.2.0-dev.0`。下面的设备名称设置和简化配置向导可先通过源码构建使用。
+当前源码版本为 `0.2.0-dev.2`，尚未发布；公共 npm 仍为 `0.2.0-dev.0`。下面的设备名称、简化配置向导和 Windows 服务可先通过源码构建使用。
 
 直接运行单文件时，使用下面的构建方式；构建需要 Go 1.25.8 或更新版本，运行生成的程序不需要安装 Go 或 Node.js。
 
@@ -58,7 +58,17 @@ URL 明文显示并可直接编辑；Token、签名密钥和请求头值使用�
 
 请将程序放在固定位置后再执行安装；移动程序或更换配置路径后，重新安装 hook。
 
-`start` 在 Windows 隐藏窗口启动后台进程；首次运行只为已有会话建立读取基线，不发送历史完成消息。之后的读取位置与待发通知保存在配置目录下的 `data` 中，停止期间的新记录会在重启后继续读取。首版不设置开机自启，重新登录系统后需要再次启动。
+`start` 在 Windows 隐藏窗口启动普通后台进程，不设置开机自启，重新登录系统后需要再次启动。首次运行只为已有会话建立读取基线，不发送历史完成消息。之后的读取位置与待发通知保存在配置目录下的 `data` 中，停止期间的新记录会在重启后继续读取。
+
+需要开机自动运行时，可注册 Windows 服务。先配置通知渠道并停止普通后台进程，再在同一账户的管理员 PowerShell 中执行：
+
+```powershell
+.\bin\blip.exe service install
+.\bin\blip.exe service start
+.\bin\blip.exe service status
+```
+
+服务注册为自动（延迟启动），重启后无需登录即可运行。使用 `service stop` 停止、`service uninstall` 停止并卸载；配置和通知数据保留。服务使用独立低权限身份、安装时记录的配置与 Codex 目录，以及单独保存的程序副本。升级、目录权限和自定义配置用法见 [Windows 服务](docs/windows-service.md)。
 
 ## 命令
 
@@ -70,6 +80,7 @@ init                生成配置示例，适合脚本或手动编辑
 install codex       安装输入与审批 hook
 uninstall codex     仅移除本配置安装的 Blip hook
 start / stop        启动后台进程 / 请求平稳停止
+service             管理 Windows 服务（install / uninstall / start / stop / status）
 run                 在当前终端运行
 status              显示就绪状态、各目的地投递结果与损坏记录数量
 test                向所有启用的目的地排入一条测试通知
@@ -82,7 +93,7 @@ version             显示版本
 .\bin\blip.exe --config 'D:\我的工具\Blip\config.json' start
 ```
 
-配置变更后执行 `stop`、`start` 生效。`codex_home` 默认按 Codex 的 `CODEX_HOME` 设置定位，未设置时使用 `~/.codex`；也可以在配置中指定。`state_dir` 默认为配置文件同目录下的 `data`。相对路径以配置文件目录为基准。
+配置变更后执行 `stop`、`start` 生效；使用 Windows 服务时执行 `service stop`、`service start`。`codex_home` 默认按 Codex 的 `CODEX_HOME` 设置定位，未设置时使用 `~/.codex`；也可以在配置中指定。`state_dir` 默认为配置文件同目录下的 `data`。相对路径以配置文件目录为基准。服务安装时保存这些默认目录，后续更换目录需要重新安装服务。
 
 `status` 的 `running` 表示后台进程持有运行锁，`ready` 表示它已完成一次采集检查。`collector_error` 非空时，完成事件采集遇到了问题，请结合 `data/worker.log` 检查；已入队通知仍独立投递。`destinations` 按目的地列出投递数量与最近失败记录的 `last_error`，不输出目的地 URL 或凭据。`stop` 可中断长轮询和等待中的网络请求；未确认送达的通知会保留到下次启动。
 

@@ -2,7 +2,7 @@
 
 Blip 的 npm 包包含一个轻量 Node.js 启动器，并通过 npm 的可选依赖选择本机平台的 Go 可执行文件。用户不需要 Go 编译器，安装期间不执行下载脚本。命令名称为 `blip`；后台进程和 Codex hook 仍直接运行本地 Go 程序。
 
-当前源码版本为 `0.2.0-dev.1`，尚未发布。公共 npm 的 `@teamsillybees/blip@next` 仍为 `0.2.0-dev.0`；设备名称和简化向导等后续修改需先使用下面的本地构建版本。
+当前源码版本为 `0.2.0-dev.2`，尚未发布。公共 npm 的 `@teamsillybees/blip@next` 仍为 `0.2.0-dev.0`；设备名称、简化向导和 Windows 服务等后续修改需先使用下面的本地构建版本。
 
 ## 本地构建并安装
 
@@ -15,7 +15,7 @@ npm run build:npm:current
 输出位于 `dist/npm/`，包含启动器和当前平台原生包。Windows x64 的本地安装命令为：
 
 ```powershell
-npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.0-dev.1.tgz ./dist/npm/teamsillybees-blip-0.2.0-dev.1.tgz
+npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.0-dev.2.tgz ./dist/npm/teamsillybees-blip-0.2.0-dev.2.tgz
 blip version
 blip configure
 ```
@@ -53,6 +53,8 @@ blip status
 
 配置和队列位于用户配置目录，与 npm 包分开。升级前先执行 `blip stop`，避免 Windows 正在运行的可执行文件被占用；升级后重新执行 `blip install codex` 和 `blip start`，并根据 Codex 提示确认 hook 信任。卸载前执行 `blip stop`、`blip uninstall codex`，再卸载 npm 包；配置和历史收据仍保留在用户目录。
 
+如果已经注册 Windows 服务，应在管理员终端先执行 `blip service uninstall`，升级 npm 包后再执行 `blip service install`、`blip service start`。服务运行的是独立程序副本，更新 npm 包不会自动更新该副本；卸载 npm 包也不会自动删除服务。完整步骤见 [Windows 服务](windows-service.md)。
+
 需要长期使用 hook 时应将包安装到稳定位置。临时 `npx` 缓存目录可能被清理，不适合作为 hook 的固定程序路径。若 npm 被配置为省略可选依赖，启动器会提示使用 `--include=optional` 重新安装。
 
 ## 验证和发布准备
@@ -70,9 +72,9 @@ npm run test:npm-install
 具备 `@teamsillybees` scope 发布权限后，先发布六个原生包，再发布启动器包。当前是预发行版本，发布时使用单独的 dist-tag，例如：
 
 ```powershell
-npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.0-dev.1.tgz --access public --tag next
+npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.0-dev.2.tgz --access public --tag next
 # 按相同方式发布其余五个原生包，最后发布启动器：
-npm publish ./dist/npm/teamsillybees-blip-0.2.0-dev.1.tgz --access public --tag next
+npm publish ./dist/npm/teamsillybees-blip-0.2.0-dev.2.tgz --access public --tag next
 ```
 
 安装已发布的预发行版使用 `npm install -g @teamsillybees/blip@next`。`0.2.0-dev.0` 首次发布后，npm 同时设置了 `latest` 和 `next`；删除 `latest` 的请求返回 HTTP 400，因此当前 `latest` 不代表正式版。正式版本发布后再将 `latest` 指向正式版本。仓库脚本不会自动执行 publish。

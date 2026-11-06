@@ -63,6 +63,14 @@ CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失
 - 本机 HTTP 测试验证四类渠道的设备标识，其中 Gotify 标题和正文均含设备名；进程集成测试覆盖完成、审批、输入、手动测试及重启恢复的设备名传播。重试保留事件入队时的名称，旧队列缺少名称时在发送阶段补用当前配置。
 - `go test ./...`、`go vet ./...`、Node 测试及 Windows x64 本地 npm 打包/离线安装通过。`0.2.0-dev.1` 尚未发布到公共 npm；没有修改真实 Codex 配置或发送真实通知。
 
+## Windows 服务（2026-11-06，0.2.0-dev.2）
+
+- 新增 `service install/start/stop/status/uninstall`，注册为 LocalService 下的独立 Windows 服务，设置自动延迟启动，保存管理员保护的程序副本及安装时解析的配置、Codex 和队列路径。
+- Windows 原生测试覆盖中文与空格路径、启动参数转义、服务归属检查、受保护目录 ACL、配置原子替换后的读取权限、卸载时只清理本服务身份的授权，以及非管理员查询未安装服务。
+- 服务运行测试覆盖初始化后报告就绪、启动失败、停止与系统关机处理；CLI 回归覆盖服务环境缺少 `APPDATA` 时使用显式配置路径，以及启动诊断不记录配置中的敏感内容。
+- `go test ./...`、`go vet ./...`、Node 测试、六个平台的 npm 构建和 Windows x64 本地 npm 安装验证通过。测试使用临时配置，没有发送真实通知。
+- 当前终端不是管理员，真实 SCM 注册、启动、卸载及重启后的自动启动尚未实测。已提供需管理员权限并显式设置 `BLIP_TEST_WINDOWS_SERVICE=1` 才运行的 `TestWindowsServiceSCMLifecycle` 集成测试。`0.2.0-dev.2` 尚未发布到公共 npm。
+
 ## 一手资料
 
 - [Codex Hooks](https://learn.chatgpt.com/docs/hooks)：事件、信任机制、工具覆盖、默认启用与 commandWindows。

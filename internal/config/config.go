@@ -33,6 +33,13 @@ type Config struct {
 	Path           string        `json:"-"`
 }
 
+// RuntimeDefaults preserves paths captured from the installing user's profile
+// when a service runs under a different account. Nonempty paths must be absolute.
+type RuntimeDefaults struct {
+	StateDir  string
+	CodexHome string
+}
+
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -41,14 +48,29 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, "Blip", "config.json"), nil
 }
 
-func Read(path string) (Config, error) { return read(path, true) }
+func Read(path string) (Config, error) { return read(path, true, RuntimeDefaults{}) }
+
+// ReadWithDefaults validates the configuration for sending and uses the supplied
+// paths only when their config fields are empty. Explicit relative config paths
+// remain relative to the configuration directory, never the service's directory.
+func ReadWithDefaults(path string, defaults RuntimeDefaults) (Config, error) {
+	return read(path, true, defaults)
+}
 
 // ReadLocal lets hooks and lifecycle commands operate without validating channel
 // credentials. Channel settings are validated when notifications are sent.
-func ReadLocal(path string) (Config, error) { return read(path, false) }
+func ReadLocal(path string) (Config, error) { return read(path, false, RuntimeDefaults{}) }
 
-func read(path string, validateChannels bool) (Config, error) {
+func read(path string, validateChannels bool, defaults RuntimeDefaults) (Config, error) {
 	var c Config
+	for _, entry := range []struct{ name, path string }{
+		{"state_dir", defaults.StateDir},
+		{"codex_home", defaults.CodexHome},
+	} {
+		if entry.path != "" && !filepath.IsAbs(entry.path) {
+			return c, fmt.Errorf("runtime default %s must be an absolute path", entry.name)
+		}
+	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return c, err
@@ -83,7 +105,13 @@ func read(path string, validateChannels bool) (Config, error) {
 		c.MaxAttempts = 5
 	}
 	if c.StateDir == "" {
+		c.StateDir = defaults.StateDir
+	}
+	if c.StateDir == "" {
 		c.StateDir = filepath.Join(filepath.Dir(absolute), "data")
+	}
+	if c.CodexHome == "" {
+		c.CodexHome = defaults.CodexHome
 	}
 	if c.CodexHome == "" {
 		c.CodexHome = os.Getenv("CODEX_HOME")

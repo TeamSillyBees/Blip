@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.2.0-dev.1"
+var version = "0.2.0-dev.2"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -32,10 +32,7 @@ func main() {
 }
 
 func run(args []string, input io.Reader, output io.Writer) error {
-	defaultPath, err := config.DefaultPath()
-	if err != nil {
-		return err
-	}
+	defaultPath, defaultPathErr := config.DefaultPath()
 	path := defaultPath
 	root := &cobra.Command{
 		Use:           "blip",
@@ -52,6 +49,21 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	root.SetErr(output)
 	root.SetArgs(args)
 	root.PersistentFlags().StringVar(&path, "config", defaultPath, "configuration path")
+	root.PersistentPreRunE = func(command *cobra.Command, _ []string) error {
+		if path != "" || command == root || command.Name() == "version" || command.HasSubCommands() {
+			return nil
+		}
+		for parent := command; parent != nil; parent = parent.Parent() {
+			if parent.Name() == "completion" {
+				return nil
+			}
+		}
+		if defaultPathErr != nil {
+			return fmt.Errorf("default configuration path is unavailable; specify --config: %w", defaultPathErr)
+		}
+		return fmt.Errorf("configuration path must not be empty")
+	}
+	root.AddCommand(newServiceCommand(&path))
 	root.SetVersionTemplate("{{.Version}}\n")
 	for _, entry := range []struct{ name, description string }{
 		{"init", "Create a configuration with disabled example destinations"},

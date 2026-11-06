@@ -98,6 +98,12 @@ type Status struct {
 }
 
 func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
+	return RunWithReady(ctx, c, logger, nil)
+}
+
+// RunWithReady reports initialization once, after the first completed collection
+// pass and its ready status have been published. The callback must not block.
+func RunWithReady(ctx context.Context, c config.Config, logger *log.Logger, ready func()) error {
 	if c.DeviceName == "" {
 		c.DeviceName = config.DefaultDeviceName()
 	}
@@ -177,6 +183,10 @@ func Run(ctx context.Context, c config.Config, logger *log.Logger) error {
 		status.Ready = true
 		if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
 			return err
+		}
+		if ready != nil {
+			ready()
+			ready = nil
 		}
 		if time.Since(lastPrune) >= time.Hour {
 			if err = queue.Prune(time.Now().UTC()); err != nil {
