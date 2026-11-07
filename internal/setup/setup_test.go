@@ -27,6 +27,7 @@ type scriptedPrompter struct {
 	steps  []promptStep
 	inputs []TextInput
 	shown  strings.Builder
+	result Result
 }
 
 func (p *scriptedPrompter) next(op, title, description string) promptStep {
@@ -106,9 +107,11 @@ func runScript(t *testing.T, path string, steps ...promptStep) (*scriptedPrompte
 	t.Helper()
 	p := &scriptedPrompter{t: t, steps: steps}
 	var output bytes.Buffer
-	if err := RunWithPrompter(context.Background(), path, p, &output); err != nil {
+	result, err := RunWithPrompter(context.Background(), path, p, &output)
+	if err != nil {
 		t.Fatal(err)
 	}
+	p.result = result
 	if len(p.steps) > 0 {
 		t.Fatalf("%d unused prompts", len(p.steps))
 	}
@@ -118,14 +121,14 @@ func runScript(t *testing.T, path string, steps ...promptStep) (*scriptedPrompte
 func TestAddAllChannelsAndMultipleDestinations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	p, output := runScript(t, path,
-		inputStep("<default>"),
-		selectStep("wecom"), inputStep("work"), inputStep("https://wecom.invalid/hook?key=private-wecom"), confirmStep(true),
-		selectStep("add"), selectStep("feishu"), inputStep("team"), inputStep("https://feishu.invalid/private-feishu"), inputStep("private-signature"), confirmStep(true),
-		selectStep("add"), selectStep("gotify"), inputStep("phone"), inputStep("https://gotify.invalid"), inputStep("private-gotify-token"), inputStep("<default>"), confirmStep(true),
-		selectStep("add"), selectStep("webhook"), inputStep("automation"), inputStep("https://webhook.invalid/notify"), inputStep(""),
-		selectStep("add"), inputStep("X-API-Key"), inputStep("private-header"), selectStep("done"), confirmStep(false),
-		selectStep("add"), selectStep("wecom"), inputStep("other-work"), inputStep("https://wecom.invalid/another"), confirmStep(true),
-		selectStep("save"), confirmStep(true),
+		selectStep("wecom"), inputStep("https://wecom.invalid/hook?key=private-wecom"),
+		selectStep("add"), selectStep("feishu"), inputStep("https://feishu.invalid/private-feishu"), inputStep("private-signature"),
+		selectStep("add"), selectStep("gotify"), inputStep("https://gotify.invalid"), inputStep("private-gotify-token"),
+		selectStep("add"), selectStep("webhook"), inputStep("https://webhook.invalid/notify"), inputStep(""),
+		selectStep("add"), inputStep("X-API-Key"), inputStep("private-header"), selectStep("done"),
+		selectStep("toggle"), selectStep("3"), confirmStep(true),
+		selectStep("add"), selectStep("wecom"), inputStep("https://wecom.invalid/another"),
+		selectStep("save"),
 	)
 	doc, err := config.OpenDocument(path)
 	if err != nil {
@@ -134,8 +137,15 @@ func TestAddAllChannelsAndMultipleDestinations(t *testing.T) {
 	if len(doc.Config.Destinations) != 5 {
 		t.Fatalf("saved %d destinations", len(doc.Config.Destinations))
 	}
-	if doc.Config.DeviceName != config.DefaultDeviceName() || p.inputs[0].Title != "设备名称" || p.inputs[0].Initial != config.DefaultDeviceName() {
-		t.Fatal("first configuration did not offer or preserve the default device name")
+	if doc.Config.DeviceName != config.DefaultDeviceName() {
+		t.Fatal("first configuration did not preserve the default device name")
+	}
+	ids := map[string]bool{}
+	for _, d := range doc.Config.Destinations {
+		if ids[d.ID] || !strings.HasPrefix(d.ID, d.Kind+"-") {
+			t.Fatalf("automatic destination identity is invalid: %q", d.ID)
+		}
+		ids[d.ID] = true
 	}
 	gotify := doc.Config.Destinations[2]
 	if gotify.Priority != 5 || gotify.Token != "private-gotify-token" {
@@ -160,10 +170,52 @@ func TestAddAllChannelsAndMultipleDestinations(t *testing.T) {
 			t.Errorf("verbose hint remains: %q", hint)
 		}
 	}
-	for _, command := range []string{"blip install codex", "blip start", "blip test", "blip stop"} {
-		if !strings.Contains(output, command) {
-			t.Errorf("missing follow-up command %q", command)
+	for _, spec := range p.inputs {
+		if spec.Title == "设备名称" || spec.Title == "目的地 ID" || spec.Title == "消息优先级" {
+			t.Errorf("new destination asked for an automatic default: %q", spec.Title)
 		}
+	}
+	if !p.result.Saved || p.result.Apply {
+		t.Fatal("save-only choice requested runtime changes")
+	}
+}
+
+func TestFirstDestinationNeedsOnlyChannelURLAndSaveChoice(t *testing.T) {
+	for _, action := range []string{"apply", "save"} {
+		path := filepath.Join(t.TempDir(), "配置 with spaces.json")
+		p, _ := runScript(t, path, selectStep("wecom"), inputStep("https://example.invalid/hook"), selectStep(action))
+		if !p.result.Saved || !p.result.Changed || p.result.Apply != (action == "apply") || len(p.inputs) != 1 {
+			t.Fatalf("incorrect quick setup result: %+v, %d inputs", p.result, len(p.inputs))
+		}
+		doc, err := config.OpenDocument(path)
+		if err != nil || !doc.Config.Destinations[0].Enabled {
+			t.Fatalf("new destination was not enabled: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(path), "data")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("configuration editor performed runtime actions before returning")
+		}
+	}
+}
+
+func TestReaddingDestinationDoesNotReuseDeletedIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	runScript(t, path, selectStep("wecom"), inputStep("https://example.invalid/first"), selectStep("save"))
+	before, _ := config.OpenDocument(path)
+	runScript(t, path, selectStep("delete"), selectStep("0"), confirmStep(true), selectStep("save"))
+	runScript(t, path, selectStep("wecom"), inputStep("https://example.invalid/second"), selectStep("save"))
+	after, _ := config.OpenDocument(path)
+	if before.Config.Destinations[0].ID == after.Config.Destinations[0].ID {
+		t.Fatal("new destination reused an ID whose receipts may still exist")
+	}
+}
+
+func TestEditingGotifyPriorityPreservesDisabledState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	runScript(t, path, selectStep("gotify"), inputStep("https://example.invalid"), inputStep("test-token"), selectStep("toggle"), selectStep("0"), confirmStep(true), selectStep("save"))
+	p, _ := runScript(t, path, selectStep("edit"), selectStep("0"), inputStep("<default>"), selectStep("keep"), inputStep("8"), selectStep("save"))
+	doc, err := config.OpenDocument(path)
+	if err != nil || doc.Config.Destinations[0].Priority != 8 || doc.Config.Destinations[0].Enabled || p.result.Apply {
+		t.Fatalf("editing priority altered enabled state or was not saved: %v", err)
 	}
 }
 
@@ -201,8 +253,8 @@ func TestEditShowsURLAndPreservesStableIDOtherSettingsAndCredentials(t *testing.
 		selectStep("edit"), selectStep("0"), inputStep("<default>"), selectStep("keep"),
 		selectStep("edit"), selectStep("X-API-Key"), inputStep("<default>"), selectStep("keep"),
 		selectStep("delete"), selectStep("X-Remove"), confirmStep(true),
-		selectStep("add"), inputStep("X-New"), inputStep("new-private-value"), selectStep("done"), confirmStep(true),
-		selectStep("save"), confirmStep(true),
+		selectStep("add"), inputStep("X-New"), inputStep("new-private-value"), selectStep("done"),
+		selectStep("save"),
 	)
 	after, err := config.OpenDocument(path)
 	if err != nil {
@@ -238,7 +290,7 @@ func TestCancelAfterHeaderMutationLeavesOriginalBytesAndNoBackup(t *testing.T) {
 			path := writeExisting(t)
 			_, output := runScript(t, path,
 				selectStep("edit"), selectStep("0"), inputStep("<default>"), selectStep("keep"),
-				selectStep("delete"), selectStep("X-Remove"), confirmStep(true), selectStep("done"), confirmStep(false), cancel,
+				selectStep("delete"), selectStep("X-Remove"), confirmStep(true), selectStep("done"), cancel,
 			)
 			content, err := os.ReadFile(path)
 			if err != nil || string(content) != existingConfig {
@@ -261,9 +313,12 @@ func errorName(err error) string {
 	return err.Error()
 }
 
-func TestNewConfigCancelAndDeclinedSaveDoNotCreateFile(t *testing.T) {
+func TestNewConfigCancelDoesNotCreateFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")
-	runScript(t, path, inputStep("My Device"), selectStep("back"), selectStep("save"), confirmStep(false), selectStep("cancel"))
+	p, _ := runScript(t, path, selectStep("back"), selectStep("device"), inputStep("My Device"), selectStep("cancel"))
+	if p.result.Saved || p.result.Apply {
+		t.Fatal("cancel requested runtime changes")
+	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("cancel created configuration")
 	}
@@ -271,7 +326,7 @@ func TestNewConfigCancelAndDeclinedSaveDoNotCreateFile(t *testing.T) {
 
 func TestFirstDeviceNameCanBeCustomizedAndValidated(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	p, _ := runScript(t, path, inputStep("家里的工作电脑"), selectStep("back"), selectStep("save"), confirmStep(true))
+	p, _ := runScript(t, path, selectStep("back"), selectStep("device"), inputStep("家里的工作电脑"), selectStep("save"))
 	doc, err := config.OpenDocument(path)
 	if err != nil {
 		t.Fatal(err)
@@ -300,7 +355,7 @@ func TestDeviceRenamePreservesDestinationsAndOtherSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, _ := runScript(t, path, selectStep("device"), inputStep("旅行电脑"), selectStep("save"), confirmStep(true))
+	p, _ := runScript(t, path, selectStep("device"), inputStep("旅行电脑"), selectStep("save"))
 	after, err := config.OpenDocument(path)
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +385,7 @@ func TestCancelledDeviceRenameLeavesOriginalBytes(t *testing.T) {
 	}
 }
 
-func TestExistingConfigWithoutDeviceNamePromptsBeforeMenu(t *testing.T) {
+func TestExistingConfigWithoutDeviceNameUsesDefaultWithoutPrompt(t *testing.T) {
 	path := writeExisting(t)
 	withoutDevice := strings.Replace(existingConfig, "  \"device_name\": \"Office-PC\",\n", "", 1)
 	if err := os.WriteFile(path, []byte(withoutDevice), 0600); err != nil {
@@ -343,21 +398,21 @@ func TestExistingConfigWithoutDeviceNamePromptsBeforeMenu(t *testing.T) {
 	if before.Config.DeviceName != "" {
 		t.Fatal("fixture unexpectedly contains a device name")
 	}
-	p, _ := runScript(t, path, inputStep("<default>"), selectStep("save"), confirmStep(true))
+	p, _ := runScript(t, path, selectStep("save"))
 	after, err := config.OpenDocument(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := before.Config.Clone()
 	want.DeviceName = config.DefaultDeviceName()
-	if len(p.inputs) != 1 || p.inputs[0].Title != "设备名称" || !reflect.DeepEqual(after.Config, want) {
-		t.Fatal("existing config did not prompt for and preserve the default device name")
+	if len(p.inputs) != 0 || !reflect.DeepEqual(after.Config, want) {
+		t.Fatal("existing config did not use the default device name without prompting")
 	}
 }
 
-func TestCancelledFirstDevicePromptDoesNotCreateConfig(t *testing.T) {
+func TestCancelledFirstPromptDoesNotCreateConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	runScript(t, path, promptStep{op: "input", err: ErrCancelled})
+	runScript(t, path, promptStep{op: "select", err: ErrCancelled})
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("cancelled device prompt created a configuration")
 	}
@@ -368,9 +423,9 @@ func TestToggleDeleteAndSecretClearRequireExplicitChoices(t *testing.T) {
 	runScript(t, path,
 		selectStep("toggle"), selectStep("0"), confirmStep(true),
 		selectStep("delete"), selectStep("0"), confirmStep(false),
-		selectStep("edit"), selectStep("1"), inputStep("<default>"), selectStep("clear"), confirmStep(false),
+		selectStep("edit"), selectStep("1"), inputStep("<default>"), selectStep("clear"),
 		selectStep("delete"), selectStep("0"), confirmStep(true),
-		selectStep("save"), confirmStep(true),
+		selectStep("save"),
 	)
 	doc, err := config.OpenDocument(path)
 	if err != nil {
@@ -387,7 +442,7 @@ func TestChangingBearerTokenCanResolveExistingAuthorization(t *testing.T) {
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runScript(t, path, selectStep("edit"), selectStep("0"), inputStep("<default>"), inputStep("new-bearer"), selectStep("done"), confirmStep(true), confirmStep(true), selectStep("save"), confirmStep(true))
+	runScript(t, path, selectStep("edit"), selectStep("0"), inputStep("<default>"), inputStep("new-bearer"), selectStep("done"), confirmStep(true), selectStep("save"))
 	doc, err := config.OpenDocument(path)
 	if err != nil {
 		t.Fatal(err)
@@ -430,7 +485,7 @@ func TestValidationAndBlankSecretReplacement(t *testing.T) {
 
 func TestRunRejectsNonTTYBeforeCreatingDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := Run(context.Background(), path, strings.NewReader(""), io.Discard, true); err == nil || !strings.Contains(err.Error(), "TTY") {
+	if _, err := Run(context.Background(), path, strings.NewReader(""), io.Discard, true); err == nil || !strings.Contains(err.Error(), "TTY") {
 		t.Fatalf("non-TTY input was not clearly rejected: %v", err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {

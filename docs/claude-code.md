@@ -6,8 +6,7 @@
 blip sources add --source claude-main --harness claude-code --home "$env:USERPROFILE\.claude"
 blip install claude-code --source claude-main
 blip doctor --source claude-main
-blip stop
-blip start
+blip restart
 ```
 
 `--home` 必须对应实际 Claude Code 配置目录；使用自定义 `CLAUDE_CONFIG_DIR` 时填写该目录。安装器只合并这个目录的 `settings.json`，保留其他 hooks、权限及信任设置。明确关闭 hooks 时拒绝安装，不自行打开功能。新 hook 仍须按 Claude Code 的要求审阅和信任。

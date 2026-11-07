@@ -16,7 +16,7 @@ import (
 
 func TestServiceHelpDoesNotRequireConfiguration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
-	for _, operation := range []string{"", "install", "uninstall", "start", "stop", "status"} {
+	for _, operation := range []string{"", "install", "uninstall", "start", "stop", "restart", "status"} {
 		args := []string{"--config", path, "service"}
 		if operation != "" {
 			args = append(args, operation)

@@ -13,6 +13,8 @@ import (
 
 	"github.com/TeamSillyBees/Blip/internal/codex"
 	"github.com/TeamSillyBees/Blip/internal/event"
+	"github.com/TeamSillyBees/Blip/internal/store"
+	"github.com/TeamSillyBees/Blip/internal/worker"
 )
 
 // This process test uses an isolated Codex home and a loopback server. It never
@@ -145,6 +147,15 @@ func TestCLIEndToEnd(t *testing.T) {
 		_ = json.Unmarshal(call("status"), &status)
 		return status["delivered"] == float64(3)
 	})
+	var beforeRestart, afterRestart worker.Status
+	statusPath := filepath.Join(dir, "state", "worker.json")
+	if err := store.ReadJSON(statusPath, &beforeRestart); err != nil {
+		t.Fatal(err)
+	}
+	call("restart")
+	if err := store.ReadJSON(statusPath, &afterRestart); err != nil || !afterRestart.Ready || afterRestart.PID == beforeRestart.PID {
+		t.Fatalf("restart did not replace the worker: before=%+v after=%+v err=%v", beforeRestart, afterRestart, err)
+	}
 	call("stop")
 	question = string(bytes.ReplaceAll([]byte(question), []byte("call-1"), []byte("call-2")))
 	invokeHook(question) // Offline hook input remains durably queued with its title.
@@ -179,7 +190,10 @@ func TestCLIEndToEnd(t *testing.T) {
 		_ = json.Unmarshal(call("status"), &status)
 		return status["delivered"] == float64(5)
 	})
-	call("test")
+	call("stop")
+	if output := call("test", "--wait"); !bytes.Contains(output, []byte("已送达渠道")) {
+		t.Fatalf("test did not start the stopped worker and confirm delivery: %s", output)
+	}
 	select {
 	case notification := <-received:
 		if notification.Source != "blip/test" || notification.DeviceName != deviceName || notification.SessionTitle != "Blip 测试通知" {

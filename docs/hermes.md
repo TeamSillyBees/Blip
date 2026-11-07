@@ -6,8 +6,7 @@ Hermes adapter 使用 profile 的 `config.yaml` shell hooks。安装到实际使
 blip sources add --source hermes-work --harness hermes --home 'D:\Agent Homes\hermes-work'
 blip install hermes --source hermes-work
 blip doctor --source hermes-work
-blip stop
-blip start
+blip restart
 ```
 
 安装器合并 YAML 中的 hooks，保留注释、其他 hook、outbound 配置和信任设置。它不会改写 `hooks_auto_accept` 或 `shell-hooks-allowlist.json`；需在 Hermes 中审阅和授权新增命令。卸载只删除安装清单中完整匹配的条目，用户修改过的命令条目会报告冲突。

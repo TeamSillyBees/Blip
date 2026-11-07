@@ -3,6 +3,8 @@ package setup
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -43,21 +45,33 @@ type Prompter interface {
 	Confirm(context.Context, string, string, bool) (bool, error)
 }
 
-// Run opens a Huh wizard on an interactive terminal. It never sends notifications,
-// starts a worker, or installs hooks.
-func Run(ctx context.Context, path string, input io.Reader, output io.Writer, accessible bool) error {
-	if !isTerminal(input) || !isTerminal(output) {
-		return errors.New("交互配置需要终端（TTY）输入和输出；请在终端中运行 blip configure。脚本请直接编辑配置文件")
+// Result describes the user's explicit save choice. The caller applies runtime
+// changes only after a successful save; cancellation leaves Saved false.
+type Result struct {
+	Saved   bool
+	Changed bool
+	Apply   bool
+}
+
+// CanPrompt reports whether both streams support interactive forms.
+func CanPrompt(input io.Reader, output io.Writer) bool {
+	return isTerminal(input) && isTerminal(output)
+}
+
+// Run edits local configuration. The caller handles Result.Apply separately.
+func Run(ctx context.Context, path string, input io.Reader, output io.Writer, accessible bool) (Result, error) {
+	if !CanPrompt(input, output) {
+		return Result{}, errors.New("交互配置需要终端（TTY）输入和输出；请在终端中运行 blip。脚本可用 blip init 生成配置后编辑 JSON")
 	}
 	return RunWithPrompter(ctx, path, newHuhPrompter(input, output, accessible), output)
 }
 
 // RunWithPrompter runs the same transactional controller with a supplied UI.
 // Cancellation is a successful exit with no writes; all other errors propagate.
-func RunWithPrompter(ctx context.Context, path string, prompts Prompter, output io.Writer) error {
+func RunWithPrompter(ctx context.Context, path string, prompts Prompter, output io.Writer) (Result, error) {
 	document, err := config.OpenDocument(path)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	c := controller{prompts: prompts, output: output, working: document.Config.Clone()}
 	original := document.Config.Clone()
@@ -67,32 +81,24 @@ func RunWithPrompter(ctx context.Context, path string, prompts Prompter, output 
 	}); err != nil {
 		if errors.Is(err, ErrCancelled) || errors.Is(err, context.Canceled) {
 			fmt.Fprintln(output, "已取消，未保存任何修改。")
-			return nil
+			return Result{}, nil
 		}
-		return err
+		return Result{}, err
 	}
-	fmt.Fprintln(output, "配置已保存。可按需执行：")
-	fmt.Fprintln(output, "  blip install codex")
-	fmt.Fprintln(output, "  blip start")
-	fmt.Fprintln(output, "  blip test")
-	if !reflect.DeepEqual(original, c.working) {
-		fmt.Fprintln(output, "若工作进程已在运行，请先执行 blip stop，再执行 blip start 以加载新配置。")
-	}
-	fmt.Fprintln(output, "使用自定义配置路径时，请为上述命令添加 --config 参数。")
-	return nil
+	fmt.Fprintln(output, "配置已保存：", document.Config.Path)
+	return Result{Saved: true, Changed: !reflect.DeepEqual(original, c.working), Apply: c.apply}, nil
 }
 
 type controller struct {
 	prompts Prompter
 	output  io.Writer
 	working config.Config
+	apply   bool
 }
 
 func (c *controller) run(ctx context.Context, save func() error) error {
 	if c.working.DeviceName == "" {
-		if err := c.editDeviceName(ctx); err != nil {
-			return err
-		}
+		c.working.DeviceName = config.DefaultDeviceName()
 	}
 	if len(c.working.Destinations) == 0 {
 		fmt.Fprintln(c.output, "添加第一个通知目的地。Ctrl+C 可随时取消。")
@@ -108,8 +114,16 @@ func (c *controller) run(ctx context.Context, save func() error) error {
 		if len(c.working.Destinations) > 0 {
 			choices = append(choices, Choice{"编辑目的地", "edit"}, Choice{"启用 / 停用目的地", "toggle"}, Choice{"删除目的地", "delete"})
 		}
-		choices = append(choices, Choice{"修改设备名称", "device"}, Choice{"保存并退出", "save"}, Choice{"取消，不保存", "cancel"})
-		action, err := c.prompts.Select(ctx, "通知渠道配置", c.summary(), choices, "add")
+		choices = append(choices, Choice{"修改设备名称", "device"})
+		initial := "save"
+		description := c.summary()
+		if len(c.working.Enabled()) > 0 {
+			choices = append([]Choice{{"保存并启动（发送测试通知）", "apply"}}, choices...)
+			initial = "apply"
+			description += "\n保存并启动会安装已启用来源的 hook，并启动或重启 Blip。"
+		}
+		choices = append(choices, Choice{"仅保存并退出", "save"}, Choice{"取消，不保存", "cancel"})
+		action, err := c.prompts.Select(ctx, "通知渠道配置", description, choices, initial)
 		if err != nil {
 			return err
 		}
@@ -120,15 +134,12 @@ func (c *controller) run(ctx context.Context, save func() error) error {
 			err = c.change(ctx, action)
 		case "device":
 			err = c.editDeviceName(ctx)
-		case "save":
-			var confirm bool
-			confirm, err = c.prompts.Confirm(ctx, "保存配置并退出？", c.summary(), false)
-			if err == nil && confirm {
-				if err = ctx.Err(); err != nil {
-					return err
-				}
-				return save()
+		case "save", "apply":
+			if err = ctx.Err(); err != nil {
+				return err
 			}
+			c.apply = action == "apply"
+			return save()
 		case "cancel":
 			return ErrCancelled
 		default:
@@ -167,7 +178,7 @@ func (c *controller) add(ctx context.Context) error {
 	if err != nil || kind == "back" {
 		return err
 	}
-	id, err := c.prompts.Input(ctx, TextInput{Title: "目的地 ID", Description: "用于识别通知目标并关联投递记录；保存后 ID 保持不变。", Initial: c.nextID(kind), Validate: c.validateID})
+	id, err := c.nextID(kind)
 	if err != nil {
 		return err
 	}
@@ -175,11 +186,11 @@ func (c *controller) add(ctx context.Context) error {
 	if kind == "gotify" {
 		d.Priority = 5
 	}
-	if err = c.editFields(ctx, &d); err != nil {
+	if err = c.editFields(ctx, &d, false); err != nil {
 		return err
 	}
 	c.working.Destinations = append(c.working.Destinations, d)
-	fmt.Fprintf(c.output, "已添加 %s（待保存）。\n", safeLabel(id))
+	fmt.Fprintf(c.output, "已添加并启用 %s（待保存）。\n", safeLabel(id))
 	return nil
 }
 
@@ -201,7 +212,7 @@ func (c *controller) change(ctx context.Context, action string) error {
 	switch action {
 	case "edit":
 		fmt.Fprintf(c.output, "编辑 %s。\n", safeLabel(d.ID))
-		if err = c.editFields(ctx, &d); err == nil {
+		if err = c.editFields(ctx, &d, true); err == nil {
 			c.working.Destinations[index] = d
 		}
 	case "toggle":
@@ -231,7 +242,7 @@ func (c *controller) change(ctx context.Context, action string) error {
 	return err
 }
 
-func (c *controller) editFields(ctx context.Context, d *config.Destination) error {
+func (c *controller) editFields(ctx context.Context, d *config.Destination, advanced bool) error {
 	urlTitle := "Webhook URL"
 	if d.Kind == "gotify" {
 		urlTitle = "Gotify 服务 URL"
@@ -247,7 +258,7 @@ func (c *controller) editFields(ctx context.Context, d *config.Destination) erro
 	case "wecom":
 	case "gotify":
 		d.Token, err = c.credential(ctx, "Gotify 应用 Token", d.Token, true, func(v string) error { return validateToken(v, true) })
-		if err == nil {
+		if err == nil && advanced {
 			var priority string
 			priority, err = c.prompts.Input(ctx, TextInput{Title: "消息优先级", Description: "请输入非负整数，默认 5。", Initial: strconv.Itoa(d.Priority), Validate: validatePriority})
 			if err == nil {
@@ -262,10 +273,6 @@ func (c *controller) editFields(ctx context.Context, d *config.Destination) erro
 	default:
 		return errors.New("不支持的通知渠道")
 	}
-	if err != nil {
-		return err
-	}
-	d.Enabled, err = c.prompts.Confirm(ctx, "启用此目的地？", "停用后不会接收通知；以后可以在主菜单重新启用。", d.Enabled)
 	if err != nil {
 		return err
 	}
@@ -413,11 +420,17 @@ func (c *controller) validateID(id string) error {
 	return nil
 }
 
-func (c *controller) nextID(kind string) string {
-	for i := 1; ; i++ {
-		id := fmt.Sprintf("%s-%d", kind, i)
+func (c *controller) nextID(kind string) (string, error) {
+	for {
+		// Never reuse a deleted destination's ID: its pending receipts may still
+		// exist, and must not be sent to an unrelated newly added destination.
+		var suffix [8]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return "", fmt.Errorf("生成目的地 ID：%w", err)
+		}
+		id := kind + "-" + hex.EncodeToString(suffix[:])
 		if c.validateID(id) == nil {
-			return id
+			return id, nil
 		}
 	}
 }
@@ -426,6 +439,17 @@ func (c *controller) summary() string {
 	lines := []string{"设备：" + safeLabel(c.working.DeviceName), fmt.Sprintf("共 %d 个目的地。", len(c.working.Destinations))}
 	for _, d := range c.working.Destinations {
 		lines = append(lines, destinationLabel(d))
+	}
+	var sources []string
+	for _, source := range c.working.EffectiveSources() {
+		if source.Enabled {
+			sources = append(sources, safeLabel(source.ID)+"（"+safeLabel(source.Harness)+"）")
+		}
+	}
+	if len(sources) > 0 {
+		lines = append(lines, "接入来源："+strings.Join(sources, "、"))
+	} else {
+		lines = append(lines, "未启用来源；可测试渠道，但不会采集 agent 通知。")
 	}
 	return strings.Join(lines, "\n")
 }

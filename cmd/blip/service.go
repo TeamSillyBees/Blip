@@ -27,6 +27,7 @@ func newServiceCommand(path *string) *cobra.Command {
 		{"uninstall", "Stop and remove the Windows service, keeping configuration and data"},
 		{"start", "Start the registered Windows service"},
 		{"stop", "Stop the Windows service gracefully"},
+		{"restart", "Restart the Windows service to apply configuration"},
 		{"status", "Show Windows service registration and status"},
 	} {
 		command.AddCommand(&cobra.Command{
@@ -86,7 +87,7 @@ func manageService(ctx context.Context, action, path string, output io.Writer) e
 			return err
 		}
 		fmt.Fprintln(output, "Windows service installed:", service.Name(absolute))
-		fmt.Fprintln(output, "Automatic delayed startup is enabled. Run blip service start to start it now.")
+		fmt.Fprintln(output, "Automatic delayed startup is enabled. Start it now:", cliCommand(path, "service", "start"))
 	case "start":
 		if err = service.Start(ctx, absolute); err != nil {
 			return err
@@ -97,6 +98,21 @@ func manageService(ctx context.Context, action, path string, output io.Writer) e
 			return err
 		}
 		fmt.Fprintln(output, "Windows service stopped.")
+	case "restart":
+		c, readErr := config.Read(absolute)
+		if readErr != nil {
+			return readErr
+		}
+		if len(c.Enabled()) == 0 {
+			return fmt.Errorf("configure and enable at least one destination: %s", cliCommand(path, "configure"))
+		}
+		if err = service.Stop(ctx, absolute); err != nil {
+			return err
+		}
+		if err = service.Start(ctx, absolute); err != nil {
+			return err
+		}
+		fmt.Fprintln(output, "Windows service restarted.")
 	case "uninstall":
 		if err = service.Uninstall(ctx, absolute); err != nil {
 			return err

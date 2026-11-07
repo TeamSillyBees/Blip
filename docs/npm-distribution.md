@@ -17,7 +17,7 @@ npm run build:npm:current
 ```powershell
 npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.0.tgz ./dist/npm/teamsillybees-blip-0.2.0.tgz
 blip version
-blip configure
+blip
 ```
 
 上述两个本地包需要一起安装；`--offline` 保证该验证只使用本地 tarball 和缓存，不访问 npm 注册表。安装到默认全局目录需要该目录的写入权限，也可以使用 npm 的 `--prefix` 指定自己的安装目录并将其命令目录加入 PATH。测试脚本只使用临时 prefix，不改变用户现有全局安装。
@@ -42,16 +42,12 @@ npm run build:npm
 ## 配置和升级
 
 ```powershell
-blip configure
-blip install codex
-blip start
-blip test
-blip status
+blip
 ```
 
-向导只保存配置，不会自动安装 hook 或发出消息。执行 `install codex` 后，在 Codex 中审阅并信任 hook。`configure --accessible` 提供适合屏幕阅读器的提示，仍需要交互终端；自动化脚本可使用 `blip init` 和 JSON 配置。
+向导的“保存并启动”会安装已启用来源的 hook、启动或重启通知进程，并测试渠道投递；也可选择“仅保存并退出”。安装后仍需在对应 agent 中审阅并信任 hook。`blip --accessible` 提供适合屏幕阅读器的提示，仍需要交互终端；自动化脚本可使用 `blip init` 和 JSON 配置。非交互环境下，裸 `blip` 显示帮助。
 
-配置和队列位于用户配置目录，与 npm 包分开。升级前先执行 `blip stop`，避免 Windows 正在运行的可执行文件被占用；升级后重新执行 `blip install codex` 和 `blip start`，并根据 Codex 提示确认 hook 信任。卸载前执行 `blip stop`、`blip uninstall codex`，再卸载 npm 包；配置和历史收据仍保留在用户目录。
+配置和队列位于用户配置目录，与 npm 包分开。升级前先执行 `blip stop`，避免 Windows 正在运行的可执行文件被占用；升级后打开 `blip`，选择“保存并启动”以刷新接入、启动并测试，并根据 agent 提示确认 hook 信任。卸载前执行 `blip stop`、`blip uninstall codex`，再卸载 npm 包；配置和历史收据仍保留在用户目录。
 
 如果已经注册 Windows 服务，应在管理员终端先执行 `blip service uninstall`，升级 npm 包后再执行 `blip service install`、`blip service start`。服务运行的是独立程序副本，更新 npm 包不会自动更新该副本；卸载 npm 包也不会自动删除服务。完整步骤见 [Windows 服务](windows-service.md)。
 

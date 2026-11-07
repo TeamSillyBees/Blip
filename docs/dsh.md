@@ -10,8 +10,7 @@ Blip 通过一个本地 Cordis 插件接入 DeepSeek Harness。它直接观察�
 blip sources add --source dsh-desktop --harness dsh --home "$env:USERPROFILE\.dsh\profiles\desktop"
 blip install dsh --source dsh-desktop
 blip doctor --source dsh-desktop
-blip stop
-blip start
+blip restart
 ```
 
 安装器在该 profile 的 `cordis.patch.yml` 增量插入唯一条目，在 `.blip-hooks/<source>/` 写入内容寻址的 `.mjs` 文件。插件使用 DSH 自带 Node 运行时，原生 Blip 程序和配置路径由安装器写为绝对路径，不依赖 PATH 或 shell 转义。重启 DSH profile 后验证回调；`configured_unverified` 不代表它已加载。

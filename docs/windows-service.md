@@ -1,6 +1,6 @@
 # Windows 服务
 
-从 `0.2.0-dev.2` 起，Blip 可注册为真正的 Windows 服务，由服务控制管理器（SCM）运行。普通 `blip start` 仍只启动当前用户的后台进程；只有显式执行 `blip service install` 才会注册开机自启。
+从 `0.2.0-dev.2` 起，Blip 可注册为真正的 Windows 服务，由服务控制管理器（SCM）运行。普通 `blip start` 仍启动当前用户的后台进程；只有显式执行 `blip service install` 才会注册开机自启。
 
 Windows 服务已包含在 npm 正式版 `0.2.0` 中，可使用 `npm install -g @teamsillybees/blip@latest` 安装，也可以从源码构建或使用本地安装包。通过 npm 安装时，下文的 `.\bin\blip.exe` 可替换为 `blip`。
 
@@ -9,10 +9,11 @@ Windows 服务已包含在 npm 正式版 `0.2.0` 中，可使用 `npm install -g
 先在正常用户终端配置通知渠道、安装 Codex hook，并停止已有后台进程：
 
 ```powershell
-.\bin\blip.exe configure
-.\bin\blip.exe install codex
+.\bin\blip.exe
 .\bin\blip.exe stop
 ```
+
+在向导中选择“保存并启动”，完成配置、接入和渠道测试后，再停止普通后台进程以安装服务。
 
 在 Codex 中审阅并信任 hook。然后以同一个 Windows 账户打开管理员 PowerShell，进入 Blip 目录，执行：
 
@@ -40,12 +41,13 @@ blip service status      # 查询服务是否注册、运行状态及启动类�
 blip status              # 查看采集和通知投递状态
 blip service stop        # 平稳停止服务；下次开机仍会自动启动
 blip service start       # 再次启动服务
+blip restart             # 重启服务并加载配置
 blip service uninstall   # 停止并删除服务，取消开机自启
 ```
 
 安装、启动、停止和卸载需要管理员权限，服务状态查询只申请读取权限。`service uninstall` 保留原配置、Codex hook 和通知队列；如果还要解除 Codex 接入，再执行 `blip uninstall codex`。
 
-同一配置同时只允许运行一个工作进程。安装服务后使用 `service start/stop` 管理它，避免与普通后台方式混用。
+同一配置同时只允许运行一个工作进程。新增的 `restart`、向导“保存并启动”和 `test --wait` 会自动识别已注册的服务；查询或控制服务失败时会报告错误，不会另外启动普通后台进程。原有 `start` 和 `stop` 保持普通后台进程启动、文件停止请求的语义，不新增 SCM 权限依赖；管理已注册服务请使用 `service start/stop` 或统一的 `restart`。
 
 启动和停止命令最多等待 30 秒。首次扫描较慢时，命令超时不代表服务进程已被终止，可用 `service status` 检查进度；启动阶段尚未结束时，停止和卸载命令会先等待服务可以接收停止请求。
 
@@ -65,7 +67,7 @@ blip service uninstall   # 停止并删除服务，取消开机自启
 2. 更新 CLI 或重新构建程序。
 3. 执行 `blip service install`、`blip service start`。
 
-修改渠道或设备名称后，停止并启动服务即可加载。更换配置文件、`codex_home` 或 `state_dir` 的位置时，先卸载原服务，再修改设置并重新安装，以更新路径和访问权限。
+修改渠道或设备名称后，执行 `blip restart`，或在管理员终端的向导中选择“保存并启动”即可加载。更换配置文件、`codex_home` 或 `state_dir` 的位置时，先卸载原服务，再修改设置并重新安装，以更新路径和访问权限。
 
 新增来源、变更来源读取路径或启用此前未授权的来源，也须重新安装服务。启用事件 v2 前应一起升级用户 hook 程序与服务程序副本，避免旧服务把新事件当作不支持的格式。
 

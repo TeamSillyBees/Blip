@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/event"
 	"github.com/TeamSillyBees/Blip/internal/store"
@@ -49,6 +50,40 @@ func TestStatusShowsDeliveryFailureWithoutCredentialsOrStaleReadiness(t *testing
 	}
 	if strings.Contains(output.String(), "secret-") {
 		t.Fatal("status exposed destination credentials")
+	}
+	output.Reset()
+	if err := printStatusText(c, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "已停止") || !strings.Contains(output.String(), "HTTP status 401") || strings.Contains(output.String(), "secret-") {
+		t.Fatalf("human status omitted diagnosis or exposed credentials: %s", output.String())
+	}
+}
+
+func TestHumanStatusChecksHooksAsCurrentUserInsteadOfServiceSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	c := config.Config{SchemaVersion: 1, Path: filepath.Join(dir, "config.json"), CodexHome: filepath.Join(dir, "codex"), StateDir: filepath.Join(dir, "state"), Destinations: []config.Destination{}}
+	if err := store.WriteJSON(c.Path, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := execute(context.Background(), c.Path, []string{"install", "codex"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	lock, available, err := (store.Queue{Dir: c.StateDir}).WorkerLock()
+	if err != nil || !available {
+		t.Fatalf("worker lock: %v", err)
+	}
+	defer lock.Close()
+	state := worker.Status{Ready: true, Sources: []agents.SourceStatus{{ID: config.DefaultSourceID, Harness: "codex", Enabled: true, State: "ready", Installation: "unreadable_configuration"}}}
+	if err := store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), state); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := printStatusText(c, &output); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "安装接入") || strings.Contains(output.String(), "unreadable_configuration") {
+		t.Fatalf("human status used the service's restricted hook visibility: %s", output.String())
 	}
 }
 

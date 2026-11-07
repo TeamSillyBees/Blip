@@ -9,18 +9,25 @@ import (
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
+	"github.com/TeamSillyBees/Blip/internal/setup"
 	"github.com/spf13/cobra"
 )
 
 func newSourcesCommand(path *string) *cobra.Command {
-	parent := &cobra.Command{Use: "sources", Short: "Manage stable harness source identities", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
-	parent.AddCommand(&cobra.Command{Use: "list", Short: "List configured sources", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	list := func(c *cobra.Command, _ []string) error {
 		cfg, err := config.ReadLocal(*path)
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(c.OutOrStdout()).Encode(cfg.EffectiveSources())
-	}})
+	}
+	parent := &cobra.Command{Use: "sources", Short: "查看或管理 agent 来源（终端默认列出）", Args: cobra.NoArgs, RunE: func(c *cobra.Command, args []string) error {
+		if !setup.CanPrompt(c.InOrStdin(), c.OutOrStdout()) || *path == "" {
+			return c.Help()
+		}
+		return list(c, args)
+	}}
+	parent.AddCommand(&cobra.Command{Use: "list", Short: "List configured sources", Args: cobra.NoArgs, RunE: list})
 	for _, action := range []string{"migrate", "add", "enable", "disable", "remove", "event-version"} {
 		var id, harness, home string
 		var eventVersion int
@@ -101,7 +108,8 @@ func newSourcesCommand(path *string) *cobra.Command {
 			if err = doc.Save(command.Context()); err != nil {
 				return err
 			}
-			fmt.Fprintln(command.OutOrStdout(), "Source configuration saved. Restart the worker to apply changes; reinstall the Windows service when its source read paths change.")
+			fmt.Fprintln(command.OutOrStdout(), "来源配置已保存。加载变更：", cliCommand(*path, "restart"))
+			fmt.Fprintln(command.OutOrStdout(), "Windows 服务的来源读取目录发生变化时，仍需重新安装服务。")
 			return nil
 		}}
 		if action != "migrate" {

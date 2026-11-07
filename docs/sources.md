@@ -31,7 +31,7 @@ blip sources remove --source codex-work
 
 `add` 在需要时自动迁移旧配置，新来源默认使用事件 v2。`--home` 相对当前终端解析为绝对位置；手动 JSON 中的相对路径以配置文件目录为基准。相同 harness 的同一规范化 home 不得重复注册；已存在的符号链接别名也会检查。
 
-保存配置后重启 worker。Windows 服务新增来源或更改读取位置时，先卸载、再安装服务以更新程序副本及授权；仅重启不会新增权限。Hook 始终调用原生程序和绝对配置路径，新增来源显式携带 `--source`；裸 `blip hook` 仍指向 `codex-default`。
+`blip sources` 在交互终端可直接列出来源；非交互环境保留帮助输出，脚本继续使用 `blip sources list` 获取 JSON。保存配置后执行 `blip restart`，或打开 `blip` 向导选择“保存并启动”以安装已启用来源、重启并测试。单独安装或卸载非 Codex harness 时，只有一个已配置来源可省略 `--source`；存在歧义会列出可选 ID。Codex 命令省略 `--source` 时始终操作 `codex-default`，包括来源已移除后卸载旧接入；其他 Codex 来源需显式选择。Windows 服务新增来源或更改读取位置时，先卸载、再安装服务以更新程序副本及授权；仅重启不会新增权限。Hook 始终调用原生程序和绝对配置路径，新增来源显式携带 `--source`；裸 `blip hook` 仍指向 `codex-default`。
 
 来源停用后，新 hook 被忽略，旧队列继续投递。Codex collector 的 checkpoint 保留，重新启用会补收持久日志中的增量；纯 hook 来源无法补收停用时忽略的回调。
 

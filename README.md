@@ -23,11 +23,10 @@ npm 包名为 `@teamsillybees/blip`，正式版本使用 `latest` 标签。本�
 
 ```powershell
 npm install -g @teamsillybees/blip@latest
-blip configure
-blip install codex
-blip start
-blip test
+blip
 ```
+
+选择通知渠道，填写地址和必要凭据，然后选择 **保存并启动**。Blip 会保存配置、安装已启用来源的 hook、启动通知进程并发送测试通知，逐个显示渠道投递结果。已有进程会重启以加载新配置；已注册 Windows 服务时使用该服务，需要在管理员终端操作。也可选择 **仅保存并退出**，稍后按提示应用。
 
 当前正式版本为 `0.2.0`，包含多来源接入、Codex 桌面提问补收、通知配置向导、Windows 服务和完成通知的最后回复。可用 `npm install -g @teamsillybees/blip@0.2.0` 安装指定版本。
 
@@ -35,31 +34,31 @@ blip test
 
 ```powershell
 go build -o bin/blip.exe ./cmd/blip
-.\bin\blip.exe configure
+.\bin\blip.exe
 ```
 
-`configure` 是交互式配置向导（也可写作 `config` 或 `setup`），由 [Cobra](https://github.com/spf13/cobra) 管理命令、[Charm Huh](https://github.com/charmbracelet/huh) 提供终端表单。向导支持新增、编辑、启用、停用和删除渠道目的地；飞书填写 Webhook 和可选签名密钥，企业微信填写 Webhook，Gotify 填写服务地址、应用 token 和优先级，自定义 Webhook 支持 Bearer token 或静态请求头。一个渠道可配置多个目的地。
+直接运行 `blip` 会在终端打开配置向导；`configure`、`config`、`setup` 也可打开同一向导。非交互环境下，裸 `blip` 显示帮助。命令由 [Cobra](https://github.com/spf13/cobra) 管理、终端表单由 [Charm Huh](https://github.com/charmbracelet/huh) 提供。向导支持新增、编辑、启用、停用和删除渠道目的地；飞书填写 Webhook 和可选签名密钥，企业微信只需填写 Webhook，Gotify 填写服务地址和应用 token，自定义 Webhook 支持 Bearer token 或静态请求头。一个渠道可配置多个目的地。
 
-首次配置会填写“设备名称”，默认使用当前计算机名（hostname），可自行修改；之后可在主菜单修改，保存为 `device_name`。`blip init` 也会写入当前计算机名。旧配置缺少该字段时，运行时默认使用当前计算机名，再次打开向导可确认并保存。
+设备名称自动使用当前计算机名（hostname），可在主菜单修改。目的地 ID 自动生成并保持稳定；新目的地默认启用，Gotify 优先级默认为 5，可在“编辑目的地”中调整。`blip init` 也会写入当前计算机名；旧配置缺少 `device_name` 时自动使用此默认值。
 
-URL 明文显示并可直接编辑；Token、签名密钥和请求头值使用遮蔽输入，编辑时可保留现值。修改先保存在内存中，确认保存后一次写入配置；取消或 Ctrl+C 不保存。已有配置更新前会备份为 `config.json.bak`，若另一程序同时修改了文件，向导会拒绝覆盖并提示重新打开。保存后按提示安装 Codex hook、启动后台进程；修改运行中的配置需要 `stop`、`start` 才能生效。
+URL 明文显示并可直接编辑；Token、签名密钥和请求头值使用遮蔽输入，编辑时可保留现值。修改先保存在内存中，选择保存操作后一次写入配置；保存前取消或 Ctrl+C 不保存。已有配置更新前会备份为 `config.json.bak`，若另一程序同时修改了文件，向导会拒绝覆盖并提示重新打开。选择“保存并启动”后若安装或投递失败，已保存的配置保留，终端会说明失败环节；修正后可重新打开向导继续。仅保存时，根据当前运行状态给出下一步命令，并带上实际配置路径。
 
 配置默认保存在 `%APPDATA%\Blip\config.json`。在真实终端运行向导；需要屏幕阅读器友好的文本提示时使用 `blip configure --accessible`。脚本环境可使用 `blip init` 生成示例后编辑 JSON；[配置示例](internal/config/example.json)中的所有目的地默认关闭。
 
-例如，启用飞书群机器人时，在配置向导中选择飞书，填写 Webhook URL 和可选的签名密钥，保存后执行：
+需要分别管理接入和后台时，仍可使用原有命令：
 
 ```powershell
 .\bin\blip.exe install codex
-.\bin\blip.exe start
-.\bin\blip.exe test
-.\bin\blip.exe status
+.\bin\blip.exe test --wait
 ```
+
+交互终端中的 `test`（或显式 `test --wait`）会在需要时启动通知进程，排入测试通知并最多等待 15 秒，分别显示已送达、失败或等待重试。未全部送达时返回非零退出码，待发记录仍留在队列中，可用 `status` 查看；“已送达渠道”表示渠道接口确认接收。脚本或重定向环境中的 `test` 保持原有的仅入队行为，不会启动进程或等待网络；`test --wait=false` 也可显式选择仅入队。测试不会替代 agent 内的 hook 信任步骤。
 
 未启用飞书签名时，删去该目的地的 `secret` 字段，或将它设为 `""`。安装命令会增量写入 Codex `hooks.json`，保留其他 hook 并备份原文件。随后在 **Codex 中审阅并信任新 hook**，必要时重开既有会话。当前 Codex 默认启用 hooks；如果配置显式关闭，安装命令会提示先在 Codex 中启用，不会改写 `config.toml` 或信任记录。
 
 请将程序放在固定位置后再执行安装；移动程序或更换配置路径后，重新安装 hook。
 
-`start` 在 Windows 隐藏窗口启动普通后台进程，不设置开机自启，重新登录系统后需要再次启动。首次运行只为已有会话建立读取基线，不发送历史完成消息。之后的读取位置与待发通知保存在配置目录下的 `data` 中，停止期间的新记录会在重启后继续读取。
+`start` 保持启动普通后台进程的原有行为，在 Windows 隐藏窗口运行，不设置开机自启；`stop` 保持通过文件请求平稳停止的行为。新增的 `restart`、向导“保存并启动”和 `test --wait` 会自动识别已注册的 Windows 服务，服务权限不足会直接报告错误。日常管理服务仍可使用 `service start/stop`。首次运行只为已有会话建立读取基线，不发送历史完成消息。之后的读取位置与待发通知保存在配置目录下的 `data` 中，停止期间的新记录会在重启后继续读取。
 
 需要开机自动运行时，可注册 Windows 服务。先配置通知渠道并停止普通后台进程，再在同一账户的管理员 PowerShell 中执行：
 
@@ -74,19 +73,21 @@ URL 明文显示并可直接编辑；Token、签名密钥和请求头值使用�
 ## 命令
 
 ```text
-blip [--config PATH] COMMAND
+blip [--config PATH] [COMMAND]
 
-configure           交互式管理各渠道配置（别名 config / setup）
+（无命令）           在终端打开配置向导
+configure           配置渠道，可一次完成接入、启动和测试（别名 config / setup）
 init                生成配置示例，适合脚本或手动编辑
 install codex       安装输入与审批 hook
 uninstall codex     仅移除本配置安装的 Blip hook
 start / stop        启动后台进程 / 请求平稳停止
-service             管理 Windows 服务（install / uninstall / start / stop / status）
+restart             重启并加载新配置；自动识别 Windows 服务
+service             管理 Windows 服务（install / uninstall / start / stop / restart / status）
 run                 在当前终端运行
-status              显示就绪状态、各目的地投递结果与损坏记录数量
+status              显示运行摘要和投递结果；--json 输出完整机器可读数据
 doctor              显示逐来源安装、能力与最近 hook 回调（可加 --source）
-sources             管理来源（list / migrate / add / enable / disable / remove / event-version）
-test                向所有启用的目的地排入一条测试通知
+sources             终端默认列出来源；脚本使用 sources list，其他管理子命令保持可用
+test                终端自动启动并检查投递；脚本默认仅入队，可加 --wait 检查投递
 version             显示版本
 ```
 
@@ -96,7 +97,9 @@ version             显示版本
 .\bin\blip.exe --config 'D:\我的工具\Blip\config.json' start
 ```
 
-配置变更后执行 `stop`、`start` 生效；使用 Windows 服务时执行 `service stop`、`service start`。`codex_home` 默认按 Codex 的 `CODEX_HOME` 设置定位，未设置时使用 `~/.codex`；也可以在配置中指定。`state_dir` 默认为配置文件同目录下的 `data`。相对路径以配置文件目录为基准。服务安装时保存这些默认目录，后续更换目录需要重新安装服务。
+在向导中选择“保存并启动”即可应用配置；手动编辑 JSON 后执行 `blip restart`。重启前会先校验新配置，校验失败不会停止原进程。`codex_home` 默认按 Codex 的 `CODEX_HOME` 设置定位，未设置时使用 `~/.codex`；也可以在配置中指定。`state_dir` 默认为配置文件同目录下的 `data`。相对路径以配置文件目录为基准。服务安装时保存这些默认目录，后续更换目录需要重新安装服务。
+
+`status` 在交互终端显示易读摘要；重定向或管道输出时默认保留 JSON，也可显式使用 `status --json`。
 
 `status` 的 `running` 表示后台进程持有运行锁，`ready` 表示公共队列和各来源初始检查已完成；`degraded` 表示某个来源受限，须查看 `sources` 中的错误码。损坏的来源游标会暂停该来源，其他来源与已入队通知继续工作。`collector_error` 兼容映射默认 Codex 的错误。`destinations` 按目的地列出投递数量与最近失败记录的 `last_error`，不输出目的地 URL 或凭据。`stop` 可中断长轮询和等待中的网络请求；未确认送达的通知会保留到下次启动。
 
@@ -106,11 +109,10 @@ version             显示版本
 
 ```powershell
 blip sources add --source codex-work --harness codex --home 'D:\Agent Homes\codex-work'
-blip install codex --source codex-work
-blip doctor --source codex-work
-blip stop
-blip start
+blip
 ```
+
+在向导选择“保存并启动”，会安装所有已启用来源并重启、测试。单独运行 `install` / `uninstall` 时，非 Codex harness 只有一个来源可省略 `--source`，存在多个来源时显式选择。`install codex` 和 `uninstall codex` 始终默认操作 `codex-default`；操作其他 Codex home 必须指定 `--source`，避免旧命令误操作其他来源。
 
 这会将配置迁移为 v2 并备份原文件。原来的 `codex-default` 保持事件 v1、旧 ID、游标和安装记录；新来源使用事件 v2，webhook 接收端须支持 `schema_version: 2`。来源 ID 与 home 绑定后不能改作另一个会话空间；停用、移除、卸载都保留历史身份。详见[来源管理与迁移](docs/sources.md)和 [webhook v2](docs/webhook-v2.md)。其他 harness 的可用范围以[兼容性记录](docs/compatibility.md)为准。
 
