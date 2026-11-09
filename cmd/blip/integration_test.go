@@ -223,7 +223,7 @@ func TestCLIEndToEnd(t *testing.T) {
 	startedAt := time.Now()
 	command := exec.Command(binary, "--config", path, "start")
 	output, err := command.CombinedOutput()
-	if err != nil || !bytes.Contains(output, []byte("started")) {
+	if err != nil || !bytes.Contains(output, []byte("Blip 已启动。")) {
 		t.Fatalf("invalid checkpoint startup result: %s %v", output, err)
 	}
 	if time.Since(startedAt) > 4*time.Second {

@@ -21,23 +21,31 @@ func newSourcesCommand(path *string) *cobra.Command {
 		}
 		return json.NewEncoder(c.OutOrStdout()).Encode(cfg.EffectiveSources())
 	}
-	parent := &cobra.Command{Use: "sources", Short: "查看或管理 agent 来源（终端默认列出）", Args: cobra.NoArgs, RunE: func(c *cobra.Command, args []string) error {
+	parent := &cobra.Command{Use: "sources", Short: "查看或管理编程助手来源（终端默认列出）", Args: noArgs, RunE: func(c *cobra.Command, args []string) error {
 		if !setup.CanPrompt(c.InOrStdin(), c.OutOrStdout()) || *path == "" {
 			return c.Help()
 		}
 		return list(c, args)
 	}}
-	parent.AddCommand(&cobra.Command{Use: "list", Short: "List configured sources", Args: cobra.NoArgs, RunE: list})
-	for _, action := range []string{"migrate", "add", "enable", "disable", "remove", "event-version"} {
+	parent.AddCommand(&cobra.Command{Use: "list", Short: "列出已配置的来源", Args: noArgs, RunE: list})
+	for _, entry := range []struct{ action, description string }{
+		{"migrate", "将旧版配置迁移为多来源配置"},
+		{"add", "添加编程助手来源"},
+		{"enable", "启用指定来源"},
+		{"disable", "停用指定来源"},
+		{"remove", "移除指定来源的配置"},
+		{"event-version", "设置指定来源的事件协议版本"},
+	} {
+		action := entry.action
 		var id, harness, home string
 		var eventVersion int
-		args := cobra.NoArgs
+		args := noArgs
 		use := action
 		if action == "event-version" {
-			args = cobra.ExactArgs(1)
+			args = oneEventVersionArg
 			use += " <1|2>"
 		}
-		command := &cobra.Command{Use: use, Short: action + " source configuration", Args: args, RunE: func(command *cobra.Command, args []string) error {
+		command := &cobra.Command{Use: use, Short: entry.description, Args: args, RunE: func(command *cobra.Command, args []string) error {
 			doc, err := config.OpenDocument(*path)
 			if err != nil {
 				return err
@@ -56,13 +64,13 @@ func newSourcesCommand(path *string) *cobra.Command {
 			case "migrate":
 			case "add":
 				if index >= 0 {
-					return fmt.Errorf("source %q already exists", id)
+					return fmt.Errorf("来源 %q 已存在", id)
 				}
 				if !config.ValidSourceID(id) || harness == "" || home == "" {
-					return fmt.Errorf("add requires --source, --harness and --home")
+					return fmt.Errorf("添加来源时必须提供有效的 --source、--harness 和 --home")
 				}
 				if _, exists := agents.Builtins()[harness]; !exists {
-					return fmt.Errorf("%w: %s", agents.ErrUnavailable, harness)
+					return &localizedError{message: "不支持的编程助手类型：" + harness, cause: agents.ErrUnavailable}
 				}
 				home, err = filepath.Abs(home)
 				if err != nil {
@@ -71,7 +79,7 @@ func newSourcesCommand(path *string) *cobra.Command {
 				doc.Config.Sources = append(doc.Config.Sources, config.Source{ID: id, Harness: harness, Home: home, Enabled: true, EventVersion: eventVersion})
 			case "enable", "disable", "remove", "event-version":
 				if index < 0 {
-					return fmt.Errorf("source %q is not configured", id)
+					return fmt.Errorf("尚未配置来源 %q", id)
 				}
 				switch action {
 				case "enable":
@@ -83,13 +91,13 @@ func newSourcesCommand(path *string) *cobra.Command {
 				case "event-version":
 					value, parseErr := strconv.Atoi(args[0])
 					if parseErr != nil || (value != 1 && value != 2) {
-						return fmt.Errorf("event version must be 1 or 2")
+						return fmt.Errorf("事件协议版本必须为 1 或 2")
 					}
 					doc.Config.Sources[index].EventVersion = value
 				}
 			}
 			if action == "add" || action == "event-version" {
-				fmt.Fprintln(command.OutOrStdout(), "Event v2 sources send source_id and may send attention_required to every enabled webhook. Receivers must handle schema_version 2.")
+				fmt.Fprintln(command.OutOrStdout(), "事件协议第 2 版会向所有已启用的 Webhook 发送 source_id，也可能发送 attention_required 事件。接收端须支持 schema_version 为 2 的消息。")
 			}
 			if err = doc.Validate(); err != nil {
 				return err
@@ -113,13 +121,13 @@ func newSourcesCommand(path *string) *cobra.Command {
 			return nil
 		}}
 		if action != "migrate" {
-			command.Flags().StringVar(&id, "source", "", "stable source ID")
+			command.Flags().StringVar(&id, "source", "", "固定的来源 ID（必填）")
 			_ = command.MarkFlagRequired("source")
 		}
 		if action == "add" {
-			command.Flags().StringVar(&harness, "harness", "", "harness adapter")
-			command.Flags().StringVar(&home, "home", "", "harness configuration directory")
-			command.Flags().IntVar(&eventVersion, "event-version", 2, "event protocol version")
+			command.Flags().StringVar(&harness, "harness", "", "编程助手类型：codex、claude-code、dsh 或 hermes（必填）")
+			command.Flags().StringVar(&home, "home", "", "编程助手配置目录（必填）")
+			command.Flags().IntVar(&eventVersion, "event-version", 2, "事件协议版本：1 或 2")
 			_ = command.MarkFlagRequired("harness")
 			_ = command.MarkFlagRequired("home")
 		}
@@ -136,7 +144,7 @@ func printDoctor(c config.Config, id string, output io.Writer) error {
 		}
 	}
 	if id != "" && len(statuses) == 0 {
-		return fmt.Errorf("source %q is not configured", id)
+		return fmt.Errorf("尚未配置来源 %q", id)
 	}
 	return json.NewEncoder(output).Encode(map[string]any{"sources": statuses})
 }

@@ -23,7 +23,7 @@ type lifecycle struct {
 	stopWorker   func(context.Context, config.Config, io.Writer) error
 }
 
-var errStopPending = errors.New("worker is still stopping")
+var errStopPending = errors.New("通知进程仍在停止中")
 
 func manageLifecycle(ctx context.Context, c config.Config, action string, output io.Writer) error {
 	m := lifecycle{query: service.Query, startService: service.Start, stopService: service.Stop, startWorker: start, stopWorker: stop}
@@ -35,7 +35,7 @@ func (m lifecycle) run(ctx context.Context, c config.Config, action string, outp
 		return err
 	}
 	if action != "start" && action != "stop" && action != "restart" {
-		return fmt.Errorf("unknown lifecycle action %q", action)
+		return fmt.Errorf("未知的进程管理操作 %q", action)
 	}
 	status, err := m.query(c.Path)
 	if err != nil && !errors.Is(err, service.ErrUnsupported) {
@@ -52,7 +52,7 @@ func (m lifecycle) run(ctx context.Context, c config.Config, action string, outp
 				return err
 			}
 		}
-		fmt.Fprintf(output, "Windows service %s.\n", map[string]string{"start": "started", "stop": "stopped", "restart": "restarted"}[action])
+		fmt.Fprintf(output, "Windows 服务%s。\n", map[string]string{"start": "已启动", "stop": "已停止", "restart": "已重启"}[action])
 		return nil
 	}
 	if action == "stop" || action == "restart" {
@@ -79,7 +79,7 @@ func stop(ctx context.Context, c config.Config, output io.Writer) error {
 		return err
 	}
 	if !running {
-		fmt.Fprintln(output, "Blip is stopped.")
+		fmt.Fprintln(output, "Blip 已停止。")
 		return nil
 	}
 	if err := store.WriteFile(filepath.Join(c.StateDir, "stop"), []byte("stop\n")); err != nil {
@@ -93,12 +93,12 @@ func stop(ctx context.Context, c config.Config, output io.Writer) error {
 			return err
 		}
 		if !running {
-			fmt.Fprintln(output, "Blip stopped.")
+			fmt.Fprintln(output, "Blip 已停止。")
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("stop requested, but the worker has not stopped yet; inspect %s: %w", cliCommand(c.Path, "status"), context.Cause(ctx))
+			return fmt.Errorf("已请求停止，但通知进程尚未退出；运行 %s 查看状态：%w", cliCommand(c.Path, "status"), context.Cause(ctx))
 		case <-time.After(100 * time.Millisecond):
 		}
 	}

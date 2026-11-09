@@ -46,7 +46,7 @@ func enqueueTest(ctx context.Context, c config.Config) (string, error) {
 		return "", err
 	}
 	if !added {
-		return "", fmt.Errorf("enable at least one destination before queuing a test notification")
+		return "", fmt.Errorf("测试通知入队前，请先启用至少一个通知目的地")
 	}
 	return notification.ID, nil
 }

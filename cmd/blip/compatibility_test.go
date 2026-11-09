@@ -37,7 +37,7 @@ func TestScriptTestKeepsOfflineQueueOnlyContract(t *testing.T) {
 			if err != nil || len(jobs) != 1 || len(jobs[0].Deliveries) != 1 || jobs[0].Deliveries[0].DestinationID != "legacy-target" || jobs[0].Deliveries[0].Attempts != 0 {
 				t.Fatalf("offline notification was not left queued: %+v %v", jobs, err)
 			}
-			if !strings.HasPrefix(output.String(), "Test notification queued.") {
+			if !strings.HasPrefix(output.String(), "测试通知已入队。") {
 				t.Fatalf("offline success no longer reports queuing: %q", output.String())
 			}
 			if _, err := os.Stat(filepath.Join(c.StateDir, "worker.json")); !os.IsNotExist(err) {
@@ -100,7 +100,7 @@ func TestBareSourcesStillShowsHelpInScriptsWithoutConfiguration(t *testing.T) {
 	if err := run([]string{"sources", "--config", path}, strings.NewReader(""), &output); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Usage:") || !strings.Contains(output.String(), "sources") {
+	if !strings.Contains(output.String(), "用法：") || !strings.Contains(output.String(), "sources") {
 		t.Fatalf("bare sources no longer shows help: %q", output.String())
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -128,7 +128,7 @@ func TestStopKeepsSuccessfulRequestExitWhenWorkerIsStillFinishing(t *testing.T) 
 	if err := run([]string{"stop", "--config", path}, strings.NewReader(""), &output); err != nil {
 		t.Fatalf("stop request changed its exit contract: %v", err)
 	}
-	if time.Since(started) < 9*time.Second || !strings.Contains(output.String(), "Stop requested; the worker is finishing its current operation.") {
+	if time.Since(started) < 9*time.Second || !strings.Contains(output.String(), "已请求停止，通知进程正在完成当前操作。") {
 		t.Fatalf("stop did not wait then report the accepted request: %s", output.String())
 	}
 	if data, err := os.ReadFile(filepath.Join(c.StateDir, "stop")); err != nil || string(data) != "stop\n" {

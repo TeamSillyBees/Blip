@@ -36,18 +36,18 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	var accessible bool
 	root := &cobra.Command{
 		Use:           "blip",
-		Short:         "在 agent 完成或需要响应时发送通知",
-		Long:          "Blip 在 agent 完成或需要你响应时发送通知。\n首次使用：直接运行 blip，填写通知渠道后选择“保存并启动”。",
+		Short:         "在编程助手完成一轮响应或需要输入时发送通知",
+		Long:          "Blip 在编程助手完成一轮响应或需要你输入时发送通知。\n首次使用：直接运行 blip，填写通知渠道后选择“保存并启动”。",
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		Args:          cobra.NoArgs,
+		Args:          noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if !setup.CanPrompt(command.InOrStdin(), command.OutOrStdout()) {
 				return command.Help()
 			}
 			if path == "" {
-				return fmt.Errorf("default configuration path is unavailable; specify --config")
+				return fmt.Errorf("无法确定默认配置路径，请用 --config 指定配置文件")
 			}
 			return configure(command.Context(), path, command.InOrStdin(), command.OutOrStdout(), accessible)
 		},
@@ -56,10 +56,14 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	root.SetOut(output)
 	root.SetErr(output)
 	root.SetArgs(args)
+	root.SetFlagErrorFunc(flagError)
 	root.PersistentFlags().StringVar(&path, "config", defaultPath, "配置文件路径")
 	root.PersistentFlags().BoolVar(&accessible, "accessible", false, "使用适合屏幕阅读器的文本提示")
 	root.PersistentPreRunE = func(command *cobra.Command, _ []string) error {
-		if path != "" || command == root || command.Name() == "version" || command.HasSubCommands() {
+		if err := requiredFlagsError(command); err != nil {
+			return err
+		}
+		if path != "" || command == root || command.Name() == "help" || command.Name() == "version" || command.HasSubCommands() {
 			return nil
 		}
 		for parent := command; parent != nil; parent = parent.Parent() {
@@ -68,9 +72,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			}
 		}
 		if defaultPathErr != nil {
-			return fmt.Errorf("default configuration path is unavailable; specify --config: %w", defaultPathErr)
+			return fmt.Errorf("无法确定默认配置路径，请用 --config 指定配置文件：%w", defaultPathErr)
 		}
-		return fmt.Errorf("configuration path must not be empty")
+		return fmt.Errorf("配置文件路径不能为空")
 	}
 	root.AddCommand(newServiceCommand(&path))
 	root.AddCommand(newSourcesCommand(&path))
@@ -84,13 +88,13 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		{"status", "查看运行状态和投递结果"},
 		{"test", "测试通知；终端检查投递，脚本默认仅入队"},
 		{"doctor", "检查来源接入、能力和最近回调"},
-		{"hook", "Capture a harness hook event from standard input"},
+		{"hook", "从标准输入接收编程助手的钩子事件"},
 	} {
 		var sourceID string
 		var jsonOutput bool
 		var wait bool
 		command := &cobra.Command{
-			Use: entry.name, Short: entry.description, Args: cobra.NoArgs, Hidden: entry.name == "hook",
+			Use: entry.name, Short: entry.description, Args: noArgs, Hidden: entry.name == "hook",
 			RunE: func(command *cobra.Command, _ []string) error {
 				if command.Name() == "test" && (wait || (!command.Flags().Changed("wait") && setup.CanPrompt(command.InOrStdin(), command.OutOrStdout()))) {
 					c, err := config.Read(path)
@@ -114,7 +118,11 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			},
 		}
 		if entry.name == "hook" || entry.name == "doctor" {
-			command.Flags().StringVar(&sourceID, "source", "", "source ID (hook defaults to codex-default)")
+			description := "要检查的来源 ID；默认检查所有来源"
+			if entry.name == "hook" {
+				description = "来源 ID；默认使用 codex-default"
+			}
+			command.Flags().StringVar(&sourceID, "source", "", description)
 		}
 		if entry.name == "status" {
 			command.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON，适合脚本处理；重定向输出时默认启用")
@@ -125,13 +133,14 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		root.AddCommand(command)
 	}
 	for _, action := range []string{"install", "uninstall"} {
-		parent := &cobra.Command{Use: action, Short: action + " agent integration", Args: cobra.NoArgs,
+		verb := map[string]string{"install": "安装", "uninstall": "卸载"}[action]
+		parent := &cobra.Command{Use: action, Short: verb + "编程助手接入", Args: noArgs,
 			RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 		}
 		for harness := range agents.Builtins() {
 			var sourceID string
 			child := &cobra.Command{
-				Use: harness, Short: action + " Blip's " + harness + " hooks", Args: cobra.NoArgs,
+				Use: harness, Short: verb + " " + harness + " 的 Blip 通知钩子", Args: noArgs,
 				RunE: func(command *cobra.Command, _ []string) error {
 					if sourceID == "" {
 						c, err := config.ReadLocal(path)
@@ -146,7 +155,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 					return execute(command.Context(), path, []string{command.Parent().Name(), harness, sourceID}, command.InOrStdin(), command.OutOrStdout())
 				},
 			}
-			child.Flags().StringVar(&sourceID, "source", "", "configured source ID")
+			child.Flags().StringVar(&sourceID, "source", "", "已配置的来源 ID")
 			parent.AddCommand(child)
 		}
 		root.AddCommand(parent)
@@ -155,13 +164,13 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		Use: "configure", Aliases: []string{"config", "setup"},
 		Short: "配置渠道，一次完成接入、启动和测试",
 		Long:  "配置飞书、企业微信、Gotify 和自定义 Webhook。\n设备名称和目的地 ID 自动生成。选择保存并启动即可应用配置并发送测试通知；也可仅保存。\n保存前按 Ctrl+C 取消，不写入修改。",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return configure(command.Context(), path, command.InOrStdin(), command.OutOrStdout(), accessible)
 		},
 	}
 	root.AddCommand(configureCommand)
-	root.AddCommand(&cobra.Command{Use: "version", Short: "Show the build version", Args: cobra.NoArgs,
+	root.AddCommand(&cobra.Command{Use: "version", Short: "显示版本号", Args: noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			_, err := fmt.Fprintln(command.OutOrStdout(), version)
 			return err
@@ -178,6 +187,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	}
 	root.SetHelpCommandGroupID("advanced")
 	root.SetCompletionCommandGroupID("advanced")
+	localizeHelp(root)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	err := root.ExecuteContext(ctx)
@@ -205,7 +215,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 			return err
 		}
 		absolute, _ := filepath.Abs(path)
-		fmt.Fprintln(output, "Configuration created:", absolute)
+		fmt.Fprintln(output, "配置已创建：", absolute)
 		return nil
 	}
 	var c config.Config
@@ -230,7 +240,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		return nil // Notification failures cannot approve, deny, or block an agent operation.
 	case "install", "uninstall":
 		if len(command) < 2 {
-			return fmt.Errorf("specify the harness")
+			return fmt.Errorf("请指定编程助手类型")
 		}
 		id := config.DefaultSourceID
 		if len(command) > 2 {
@@ -243,14 +253,14 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 			var ok bool
 			source, ok = c.Source(id)
 			if !ok {
-				err = fmt.Errorf("source %q is not configured", id)
+				err = fmt.Errorf("尚未配置来源 %q", id)
 			}
 		}
 		if err != nil {
 			return err
 		}
 		if source.Harness != command[1] {
-			return fmt.Errorf("source %q belongs to %s", id, source.Harness)
+			return fmt.Errorf("来源 %q 属于 %s", id, source.Harness)
 		}
 		adapter, err := agents.Builtins().Open(c, source)
 		if err != nil {
@@ -258,7 +268,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		}
 		installer, ok := adapter.(agents.Installer)
 		if !ok {
-			return fmt.Errorf("source does not support automatic installation")
+			return fmt.Errorf("此来源不支持自动安装接入")
 		}
 		if command[0] == "install" {
 			if err = agents.Bind(ctx, c, source); err != nil {
@@ -276,14 +286,14 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 			return err
 		}
 		if command[0] == "install" {
-			fmt.Fprintf(output, "%s 接入已安装（%s）。请在 %s 中审阅并信任 hook，必要时重开已有会话。\n", source.Harness, source.ID, source.Harness)
+			fmt.Fprintf(output, "%s 接入已安装（%s）。请在 %s 中审阅并信任通知钩子，必要时重开已有会话。\n", source.Harness, source.ID, source.Harness)
 		} else {
 			fmt.Fprintf(output, "%s 接入已移除（%s）。配置与通知记录保留。\n", source.Harness, source.ID)
 		}
 		return nil
 	case "run":
 		if len(c.Enabled()) == 0 {
-			return fmt.Errorf("enable at least one destination: %s", cliCommand(path, "configure"))
+			return fmt.Errorf("请先启用至少一个通知目的地：%s", cliCommand(path, "configure"))
 		}
 		return worker.Run(ctx, c, log.New(os.Stderr, "Blip ", log.LstdFlags))
 	case "start":
@@ -292,14 +302,14 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		if err := stop(ctx, c, output); errors.Is(err, errStopPending) {
 			// Keep the original request-only exit contract. Restart uses stop
 			// directly and must not launch another worker until it has exited.
-			fmt.Fprintln(output, "Stop requested; the worker is finishing its current operation.")
+			fmt.Fprintln(output, "已请求停止，通知进程正在完成当前操作。")
 			return nil
 		} else {
 			return err
 		}
 	case "restart":
 		if len(c.Enabled()) == 0 {
-			return fmt.Errorf("enable at least one destination: %s", cliCommand(path, "configure"))
+			return fmt.Errorf("请先启用至少一个通知目的地：%s", cliCommand(path, "configure"))
 		}
 		return manageLifecycle(ctx, c, "restart", output)
 	case "status":
@@ -314,10 +324,10 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		if _, err := enqueueTest(ctx, c); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Test notification queued. Use %s to inspect delivery.\n", cliCommand(c.Path, "status"))
+		fmt.Fprintf(output, "测试通知已入队。运行 %s 查看投递结果。\n", cliCommand(c.Path, "status"))
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q; use blip help", command[0])
+		return fmt.Errorf("未知命令 %q；运行 blip help 查看帮助", command[0])
 	}
 }
 
@@ -337,7 +347,7 @@ func start(ctx context.Context, c config.Config, output io.Writer) error {
 		return err
 	}
 	if len(c.Enabled()) == 0 {
-		return fmt.Errorf("enable at least one destination: %s", cliCommand(c.Path, "configure"))
+		return fmt.Errorf("请先启用至少一个通知目的地：%s", cliCommand(c.Path, "configure"))
 	}
 	running, err := isRunning(c)
 	if err != nil {
@@ -346,9 +356,9 @@ func start(ctx context.Context, c config.Config, output io.Writer) error {
 	if running {
 		var status worker.Status
 		if store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &status) == nil && status.Ready {
-			fmt.Fprintln(output, "Blip is already running.")
+			fmt.Fprintln(output, "Blip 已在运行。")
 		} else {
-			fmt.Fprintf(output, "Blip is initializing. Inspect %s for readiness.\n", cliCommand(c.Path, "status"))
+			fmt.Fprintf(output, "Blip 正在初始化。运行 %s 查看是否就绪。\n", cliCommand(c.Path, "status"))
 		}
 		return nil
 	}
@@ -365,7 +375,7 @@ func start(ctx context.Context, c config.Config, output io.Writer) error {
 	child.Stdout, child.Stderr = file, file
 	platform.HideProcess(child)
 	if err = child.Start(); err != nil {
-		return fmt.Errorf("start worker: %w", err)
+		return fmt.Errorf("启动通知进程失败：%w", err)
 	}
 	childPID := child.Process.Pid
 	exited := make(chan error, 1)
@@ -377,7 +387,7 @@ func start(ctx context.Context, c config.Config, output io.Writer) error {
 		}
 		var status worker.Status
 		if running && store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &status) == nil && status.PID == childPID && status.Ready {
-			fmt.Fprintln(output, "Blip started.")
+			fmt.Fprintln(output, "Blip 已启动。")
 			return nil
 		}
 		select {
@@ -387,12 +397,12 @@ func start(ctx context.Context, c config.Config, output io.Writer) error {
 			// A simultaneous start may have won the worker lock.
 			active, _ := isRunning(c)
 			if active && store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &status) == nil && status.Ready {
-				fmt.Fprintln(output, "Blip is already running.")
+				fmt.Fprintln(output, "Blip 已在运行。")
 				return nil
 			}
-			return fmt.Errorf("worker exited during startup; inspect %s and %s", cliCommand(c.Path, "status"), filepath.Join(c.StateDir, "worker.log"))
+			return fmt.Errorf("通知进程在启动期间退出；请检查 %s 和日志 %s", cliCommand(c.Path, "status"), filepath.Join(c.StateDir, "worker.log"))
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("worker has not reported ready yet; inspect %s and %s before starting again", cliCommand(c.Path, "status"), filepath.Join(c.StateDir, "worker.log"))
+	return fmt.Errorf("通知进程尚未就绪；再次启动前请检查 %s 和日志 %s", cliCommand(c.Path, "status"), filepath.Join(c.StateDir, "worker.log"))
 }

@@ -46,7 +46,7 @@ func TestExplicitConfigurationWorksWithoutWindowsProfileEnvironment(t *testing.T
 	}
 	t.Setenv("APPDATA", "")
 	path := filepath.Join(t.TempDir(), "config.json")
-	for _, args := range [][]string{{"--help"}, {"version"}, {"service", "--help"}, {"--config", path, "init"}} {
+	for _, args := range [][]string{{"--help"}, {"help"}, {"help", "service", "install"}, {"version"}, {"service", "--help"}, {"completion", "powershell"}, {"--config", path, "init"}} {
 		if err := run(args, strings.NewReader(""), &bytes.Buffer{}); err != nil {
 			t.Fatalf("explicit configuration or configuration-free command %v failed: %v", args, err)
 		}
@@ -54,7 +54,7 @@ func TestExplicitConfigurationWorksWithoutWindowsProfileEnvironment(t *testing.T
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("explicit configuration was not created: %v", err)
 	}
-	if err := run([]string{"status"}, strings.NewReader(""), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "specify --config") {
+	if err := run([]string{"status"}, strings.NewReader(""), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "请用 --config 指定配置文件") {
 		t.Fatalf("missing default path was not diagnosed: %v", err)
 	}
 }
@@ -66,10 +66,10 @@ func TestServiceInstallRequiresEnabledDestination(t *testing.T) {
 	}
 	err := manageService(context.Background(), "install", path, &bytes.Buffer{})
 	if runtime.GOOS == "windows" {
-		if err == nil || !strings.Contains(err.Error(), "enable at least one destination") {
+		if err == nil || !strings.Contains(err.Error(), "启用至少一个通知目的地") {
 			t.Fatalf("unconfigured service installation was not refused: %v", err)
 		}
-	} else if err == nil || !strings.Contains(err.Error(), "only available on Windows") {
+	} else if err == nil || !strings.Contains(err.Error(), "仅支持在 Windows 系统上使用") {
 		t.Fatalf("unexpected non-Windows service error: %v", err)
 	}
 }
@@ -116,7 +116,7 @@ func TestServiceWorkerRecordsConfigurationFailureBeforeReady(t *testing.T) {
 		t.Fatalf("invalid configuration reported ready: %v", err)
 	}
 	logged, err := os.ReadFile(filepath.Join(defaults.StateDir, "service.log"))
-	if err != nil || !bytes.Contains(logged, []byte("configuration")) || bytes.Contains(logged, []byte("private-secret")) {
+	if err != nil || !bytes.Contains(logged, []byte("无法加载配置")) || bytes.Contains(logged, []byte("private-secret")) {
 		t.Fatalf("configuration diagnostic missing or leaked a value: %s %v", logged, err)
 	}
 }
