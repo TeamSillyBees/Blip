@@ -4,6 +4,6 @@ package main
 
 import "os/exec"
 
-func hookProcess(binary, path, line string) *exec.Cmd {
-	return exec.Command(binary, "--config", path, "hook")
+func hookProcess(line string) *exec.Cmd {
+	return exec.Command("/bin/sh", "-c", line)
 }

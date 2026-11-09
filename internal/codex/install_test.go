@@ -69,6 +69,11 @@ func TestInstallDoesNotOverwriteDisabledOrMalformedConfiguration(t *testing.T) {
 		if string(data) != entry.hooks {
 			t.Fatal("user hooks modified despite validation failure")
 		}
+		for _, path := range []string{filepath.Join(home, ".blip-hooks"), filepath.Join(c.StateDir, "installation.json")} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("validation failure created managed files: %s", path)
+			}
+		}
 	}
 }
 

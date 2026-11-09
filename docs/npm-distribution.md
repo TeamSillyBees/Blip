@@ -1,8 +1,8 @@
 # npm 安装与分发
 
-Blip 的 npm 包包含一个轻量 Node.js 启动器，并通过 npm 的可选依赖安装 Windows x64 的 Go 可执行文件。用户不需要 Go 编译器，安装期间不执行下载脚本。命令名称为 `blip`；后台进程和 Codex hook 仍直接运行本地 Go 程序。
+Blip 的 npm 包包含一个轻量 Node.js 启动器，并通过 npm 的可选依赖安装 Windows x64 的 Go 可执行文件。用户不需要 Go 编译器，安装期间不执行下载脚本。命令名称为 `blip`；后台进程直接运行本地 Go 程序，Codex hook 通过固定脚本转发到该程序，不依赖 Node.js 启动器或 PATH 查找。
 
-当前正式版本为 `0.2.1`，使用 `npm install -g @teamsillybees/blip@latest` 安装。此版本包含简化的配置向导、保存后启动与测试、`restart` 和终端状态摘要，并保留原有配置与脚本命令的兼容性。npm 分发仅支持 Windows x64；原生包与启动器保持同一版本，其他平台的 npm 包已停止提供。
+当前正式版本为 `0.2.2`，使用 `npm install -g @teamsillybees/blip@latest` 安装。此版本为 Codex hook 引入固定入口，避免仅因 npm/Node 安装路径变化而改变注册定义，并兼容旧安装记录的迁移。npm 分发仅支持 Windows x64；原生包与启动器保持同一版本，其他平台的 npm 包已停止提供。
 
 ## 本地构建并安装
 
@@ -15,7 +15,7 @@ npm run build:npm:current
 输出位于 `dist/npm/`，包含启动器和当前平台原生包。Windows x64 的本地安装命令为：
 
 ```powershell
-npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.1.tgz ./dist/npm/teamsillybees-blip-0.2.1.tgz
+npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.2.tgz ./dist/npm/teamsillybees-blip-0.2.2.tgz
 blip version
 blip
 ```
@@ -42,11 +42,11 @@ blip
 
 向导的“保存并启动”会安装已启用来源的 hook、启动或重启通知进程，并测试渠道投递；也可选择“仅保存并退出”。安装后仍需在对应 agent 中审阅并信任 hook。`blip --accessible` 提供适合屏幕阅读器的提示，仍需要交互终端；自动化脚本可使用 `blip init` 和 JSON 配置。非交互环境下，裸 `blip` 显示帮助。
 
-配置和队列位于用户配置目录，与 npm 包分开。升级前先执行 `blip stop`，避免 Windows 正在运行的可执行文件被占用；升级后打开 `blip`，选择“保存并启动”以刷新接入、启动并测试，并根据 agent 提示确认 hook 信任。卸载前执行 `blip stop`、`blip uninstall codex`，再卸载 npm 包；配置和历史收据仍保留在用户目录。
+配置和队列位于用户配置目录，与 npm 包分开。升级前先执行 `blip stop`，避免 Windows 正在运行的可执行文件被占用；升级后打开 `blip`，选择“保存并启动”以刷新接入、启动并测试。也可单独运行 `blip install codex`（其他来源加 `--source ID`）刷新 Codex hook 的程序路径；仅更新 npm 包不会自动刷新该路径。固定入口及注册定义不随 Node/npm 路径变化；从旧版直接命令迁移时需要审阅一次新入口，之后按 agent 对实际定义变更的提示确认信任。卸载前执行 `blip stop`、`blip uninstall codex`，再卸载 npm 包；配置和历史收据仍保留在用户目录。
 
 如果已经注册 Windows 服务，应在管理员终端先执行 `blip service uninstall`，升级 npm 包后再执行 `blip service install`、`blip service start`。服务运行的是独立程序副本，更新 npm 包不会自动更新该副本；卸载 npm 包也不会自动删除服务。完整步骤见 [Windows 服务](windows-service.md)。
 
-需要长期使用 hook 时应将包安装到稳定位置。临时 `npx` 缓存目录可能被清理，不适合作为 hook 的固定程序路径。若 npm 被配置为省略可选依赖，启动器会提示使用 `--include=optional` 重新安装。
+需要长期使用 hook 时应使用持久安装。临时 `npx` 缓存目录可能被清理；固定入口仍需可用的目标程序，更新位置后应重新运行安装接入命令。若 npm 被配置为省略可选依赖，启动器会提示使用 `--include=optional` 重新安装。
 
 ## 验证和发布准备
 
@@ -63,8 +63,8 @@ npm run test:npm-install
 具备 `@teamsillybees` scope 发布权限后，先发布 Windows x64 原生包，再发布启动器包。仅发布本次 `manifest.json` 中列出的两个包，不使用可能包含历史构建的目录通配符。正式版本使用 `latest` 标签，例如：
 
 ```powershell
-npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.1.tgz --access public --tag latest
-npm publish ./dist/npm/teamsillybees-blip-0.2.1.tgz --access public --tag latest
+npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.2.tgz --access public --tag latest
+npm publish ./dist/npm/teamsillybees-blip-0.2.2.tgz --access public --tag latest
 ```
 
-正式版本的 `latest` 指向 `0.2.1`。预发行版本单独使用 `next` 标签；主包和 Windows x64 包保留历史版本，已有的 `0.2.0-dev.0` 仍可在 Windows x64 上通过 `@next` 安装。仓库脚本不会自动执行 publish。
+正式版本的 `latest` 指向 `0.2.2`。预发行版本单独使用 `next` 标签；主包和 Windows x64 包保留历史版本，已有的 `0.2.0-dev.0` 仍可在 Windows x64 上通过 `@next` 安装。仓库脚本不会自动执行 publish。

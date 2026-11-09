@@ -6,14 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/TeamSillyBees/Blip/internal/codex"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/event"
-	"github.com/TeamSillyBees/Blip/internal/store"
 )
 
 type codexAdapter struct {
@@ -161,57 +159,7 @@ func (a *codexAdapter) Install(ctx context.Context, executable string) error {
 }
 func (a *codexAdapter) Uninstall(ctx context.Context) error { return codex.Uninstall(ctx, a.config) }
 func (a *codexAdapter) InstallationStatus() string {
-	var manifest struct {
-		CodexHome string   `json:"codex_home"`
-		Commands  []string `json:"commands"`
-	}
-	err := store.ReadJSON(filepath.Join(a.config.StateDir, "installation.json"), &manifest)
-	if errors.Is(err, os.ErrNotExist) {
-		return "not_installed"
-	}
-	if err != nil || len(manifest.Commands) == 0 {
-		return "invalid_manifest"
-	}
-	data, err := os.ReadFile(filepath.Join(a.source.Home, "hooks.json"))
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return "unreadable_configuration"
-		}
-		return "missing_configuration"
-	}
-	var root struct {
-		Hooks map[string][]struct {
-			Hooks []struct {
-				Command string `json:"command"`
-				Windows string `json:"commandWindows"`
-			} `json:"hooks"`
-		} `json:"hooks"`
-	}
-	if json.Unmarshal(data, &root) != nil {
-		return "invalid_configuration"
-	}
-	owned := map[string]bool{}
-	for _, command := range manifest.Commands {
-		owned[command] = true
-	}
-	names := []string{"PreToolUse", "PermissionRequest"}
-	if a.source.EventVersion == 2 {
-		names = append(names, "Stop", "Interrupt", "UserPromptSubmit", "PostToolUse")
-	}
-	for _, name := range names {
-		found := false
-		for _, group := range root.Hooks[name] {
-			for _, hook := range group.Hooks {
-				if owned[hook.Command] && owned[hook.Windows] {
-					found = true
-				}
-			}
-		}
-		if !found {
-			return "missing_configuration"
-		}
-	}
-	return "configured_unverified"
+	return codex.InstallationStatus(a.config, a.source.EventVersion)
 }
 func (a *codexAdapter) ReadPaths() []ReadPath {
 	return []ReadPath{{Path: filepath.Join(a.source.Home, "sessions"), Directory: true}, {Path: filepath.Join(a.source.Home, "session_index.jsonl"), Optional: true}}

@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-func hookProcess(binary, path, line string) *exec.Cmd {
+func hookProcess(line string) *exec.Cmd {
 	shell := os.Getenv("COMSPEC")
 	if shell == "" {
 		shell = "cmd.exe"

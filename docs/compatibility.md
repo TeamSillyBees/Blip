@@ -2,6 +2,15 @@
 
 首版验收目标为 Windows 的 Codex CLI 与桌面版。以下区分接口文档、已有实机证据与 Blip 本地测试；不将协议模拟称为所有 Codex 路径已经实测。
 
+## Codex 固定 hook 入口（2026-11-09，0.2.2）
+
+- 参考本机 Orca 的固定 `~/.orca/agent-hooks/codex-hook.cmd` 挂载方式。Blip 在配置的 Codex home 下维护独立入口与可变转发目标；入口不包含 npm/Node 版本路径，不需要 Node、PowerShell 或运行时 PATH 查找。Windows 使用原生 cmd，Linux/macOS 使用 POSIX sh。
+- 旧安装清单、默认来源的隐式 ID、事件 v1/v2、其他 hook 和配置均保留兼容。测试验证升级后 `hooks.json` 与入口内容逐字不变；多个配置共享 home 时，不改变既有 hook 顺序和用户 JSON 格式。注册定义真正变化时仍须按照 [Codex hook 信任规则](https://learn.chatgpt.com/docs/hooks)审阅，未写入或绕过信任记录。
+- Windows 原生进程与 WSL Ubuntu 的 POSIX 进程测试通过：中文、空格、单引号、括号、`&`，以及目标程序/配置路径中的 `%PATH%`、`!`、`^` 按字面传递；150 KB stdin、cwd、来源参数与升级后的程序选择保持正确。目标程序错误、丢失或转发文件丢失时，入口静默成功退出，不干预 agent 的操作。
+- 回归覆盖旧直接命令迁移、备份、缺失脚本修复、用户修改冲突、升级中断恢复、多配置隔离，以及 `hooks.json` 缺失后的精确卸载。诊断会检查入口完整性；卸载不递归删除目录，保留无关文件。
+- Windows `go test ./...`、`go vet ./...`、12 项 npm 测试和程序构建通过；Codex 包全部测试在 WSL Ubuntu 运行通过，macOS ARM64 交叉构建通过。验证使用临时 home 与本机通知接收服务。没有修改真实 Codex hook 配置，尚未用桌面审批 UI 验证本次迁移；macOS 的运行验收仍需在该平台进行。
+- `0.2.2` 的 Windows x64 原生包和启动器已通过本地打包及隔离的离线安装检查。安装测试同步适配中文 CLI 的无效命令提示，继续验证非零退出、错误参数和帮助入口。
+
 ## 正式版 0.2.0（2026-11-07）
 
 - `0.2.0` 汇总以下开发阶段的功能与修复，正式 npm 安装使用 `@teamsillybees/blip@latest`。下文的“未发布”保留验收当时的状态，相关实现已纳入本正式版本；各项实机验证范围不因正式发布而扩大。

@@ -286,7 +286,11 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 			return err
 		}
 		if command[0] == "install" {
-			fmt.Fprintf(output, "%s 接入已安装（%s）。请在 %s 中审阅并信任通知钩子，必要时重开已有会话。\n", source.Harness, source.ID, source.Harness)
+			if source.Harness == "codex" {
+				fmt.Fprintf(output, "codex 接入已安装（%s）。首次安装、迁移或钩子定义变化时，请在 Codex 中审阅并信任；普通升级会沿用固定入口。必要时重开已有会话。\n", source.ID)
+			} else {
+				fmt.Fprintf(output, "%s 接入已安装（%s）。请在 %s 中审阅并信任通知钩子，必要时重开已有会话。\n", source.Harness, source.ID, source.Harness)
+			}
 		} else {
 			fmt.Fprintf(output, "%s 接入已移除（%s）。配置与通知记录保留。\n", source.Harness, source.ID)
 		}

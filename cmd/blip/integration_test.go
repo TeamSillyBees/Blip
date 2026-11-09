@@ -8,10 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
-	"github.com/TeamSillyBees/Blip/internal/codex"
 	"github.com/TeamSillyBees/Blip/internal/event"
 	"github.com/TeamSillyBees/Blip/internal/store"
 	"github.com/TeamSillyBees/Blip/internal/worker"
@@ -88,13 +88,25 @@ func TestCLIEndToEnd(t *testing.T) {
 	t.Cleanup(func() { command := exec.Command(binary, "--config", path, "stop"); _, _ = command.CombinedOutput() })
 	call("start")
 	waitFor(t, func() bool { _, err := os.Stat(filepath.Join(dir, "state", "rollout-cursors.json")); return err == nil })
-	_, windows, err := codex.Commands(binary, path)
-	if err != nil {
+	var hooks struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+				Windows string `json:"commandWindows"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := store.ReadJSON(filepath.Join(home, "hooks.json"), &hooks); err != nil {
 		t.Fatal(err)
+	}
+	handler := hooks.Hooks["PreToolUse"][0].Hooks[0]
+	line := handler.Command
+	if runtime.GOOS == "windows" && handler.Windows != "" {
+		line = handler.Windows
 	}
 	invokeHook := func(payload string) {
 		t.Helper()
-		command := hookProcess(binary, path, windows)
+		command := hookProcess(line)
 		command.Stdin = bytes.NewBufferString(payload)
 		output, err := command.CombinedOutput()
 		if err != nil || len(output) != 0 {

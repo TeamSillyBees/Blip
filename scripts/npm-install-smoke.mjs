@@ -73,7 +73,9 @@ export async function smokeInstall() {
     assert.ok(initialConfig.destinations.every((destination) => destination.enabled === false));
     const invalid = await invoke(['definitely-not-a-command']);
     assert.notEqual(invalid.code, 0);
-    assert.match(invalid.stderr, /unknown command/i);
+    assert.match(invalid.stderr, /不接受参数或子命令/);
+    assert.match(invalid.stderr, /definitely-not-a-command/);
+    assert.match(invalid.stderr, /blip --help/);
     // npm's generated bin entry must exist and be executable too. Windows' .cmd
     // shim is exercised by cmd.exe with a fixed command from a controlled cwd.
     const linked = process.platform === 'win32'
