@@ -1,6 +1,6 @@
 {
   "name": "@teamsillybees/blip",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local agent handoff notifications with interactive configuration",
   "bin": {
     "blip": "bin/blip.cjs"
@@ -13,6 +13,12 @@
   "engines": {
     "node": ">=20"
   },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TeamSillyBees/Blip.git"
@@ -25,11 +31,6 @@
     "access": "public"
   },
   "optionalDependencies": {
-    "@teamsillybees/blip-darwin-arm64": "0.2.0",
-    "@teamsillybees/blip-darwin-x64": "0.2.0",
-    "@teamsillybees/blip-linux-arm64": "0.2.0",
-    "@teamsillybees/blip-linux-x64": "0.2.0",
-    "@teamsillybees/blip-win32-arm64": "0.2.0",
-    "@teamsillybees/blip-win32-x64": "0.2.0"
+    "@teamsillybees/blip-win32-x64": "0.2.1"
   }
 }

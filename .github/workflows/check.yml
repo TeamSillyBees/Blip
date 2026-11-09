@@ -28,7 +28,9 @@ jobs:
       - run: go build ./cmd/blip
       - run: npm test
       - run: npm run build:npm:current
+        if: runner.os == 'Windows'
       - run: npm run test:npm-install
+        if: runner.os == 'Windows'
       - name: Race detector
         if: runner.os == 'Linux'
         run: go test -race ./...

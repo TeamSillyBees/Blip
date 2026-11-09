@@ -15,7 +15,7 @@ const development = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'
 function selectedTargets(args) {
   if (args.length === 0) return platforms.targets;
   if (args.length !== 2 || args[0] !== '--target') {
-    throw new Error('Usage: npm run build:npm -- [--target current|darwin-arm64|darwin-x64|linux-arm64|linux-x64|win32-arm64|win32-x64]');
+    throw new Error(`Usage: npm run build:npm -- [--target current|${platforms.targets.map((target) => target.id).join('|')}]`);
   }
   const id = args[1] === 'current' ? platforms.getTarget().id : args[1];
   const target = platforms.targets.find((item) => item.id === id);

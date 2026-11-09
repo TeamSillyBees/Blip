@@ -1,11 +1,6 @@
 'use strict';
 
 const targets = Object.freeze([
-  { platform: 'darwin', arch: 'arm64', goos: 'darwin', goarch: 'arm64' },
-  { platform: 'darwin', arch: 'x64', goos: 'darwin', goarch: 'amd64' },
-  { platform: 'linux', arch: 'arm64', goos: 'linux', goarch: 'arm64' },
-  { platform: 'linux', arch: 'x64', goos: 'linux', goarch: 'amd64' },
-  { platform: 'win32', arch: 'arm64', goos: 'windows', goarch: 'arm64' },
   { platform: 'win32', arch: 'x64', goos: 'windows', goarch: 'amd64' },
 ].map((target) => Object.freeze({
   ...target,

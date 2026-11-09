@@ -1,12 +1,12 @@
 # npm 安装与分发
 
-Blip 的 npm 包包含一个轻量 Node.js 启动器，并通过 npm 的可选依赖选择本机平台的 Go 可执行文件。用户不需要 Go 编译器，安装期间不执行下载脚本。命令名称为 `blip`；后台进程和 Codex hook 仍直接运行本地 Go 程序。
+Blip 的 npm 包包含一个轻量 Node.js 启动器，并通过 npm 的可选依赖安装 Windows x64 的 Go 可执行文件。用户不需要 Go 编译器，安装期间不执行下载脚本。命令名称为 `blip`；后台进程和 Codex hook 仍直接运行本地 Go 程序。
 
-当前正式版本为 `0.2.0`，使用 `npm install -g @teamsillybees/blip@latest` 安装。正式版本包含多来源接入、Codex 桌面提问补收、Windows 服务和完成通知的最后回复；六个平台原生包与启动器保持同一版本。
+当前正式版本为 `0.2.1`，使用 `npm install -g @teamsillybees/blip@latest` 安装。此版本包含简化的配置向导、保存后启动与测试、`restart` 和终端状态摘要，并保留原有配置与脚本命令的兼容性。npm 分发仅支持 Windows x64；原生包与启动器保持同一版本，其他平台的 npm 包已停止提供。
 
 ## 本地构建并安装
 
-构建机器需要 Go 1.25.8+、Node.js 20+ 和 npm。只构建当前平台：
+构建机器需要 Go 1.25.8+、Node.js 20+ 和 npm。在 Windows x64 上构建当前平台：
 
 ```powershell
 npm run build:npm:current
@@ -15,14 +15,14 @@ npm run build:npm:current
 输出位于 `dist/npm/`，包含启动器和当前平台原生包。Windows x64 的本地安装命令为：
 
 ```powershell
-npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.0.tgz ./dist/npm/teamsillybees-blip-0.2.0.tgz
+npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.2.1.tgz ./dist/npm/teamsillybees-blip-0.2.1.tgz
 blip version
 blip
 ```
 
 上述两个本地包需要一起安装；`--offline` 保证该验证只使用本地 tarball 和缓存，不访问 npm 注册表。安装到默认全局目录需要该目录的写入权限，也可以使用 npm 的 `--prefix` 指定自己的安装目录并将其命令目录加入 PATH。测试脚本只使用临时 prefix，不改变用户现有全局安装。
 
-构建所有平台：
+构建全部分发包（Windows x64 原生包和启动器）：
 
 ```powershell
 npm run build:npm
@@ -31,13 +31,8 @@ npm run build:npm
 | 平台 | 架构 | 原生包 |
 | --- | --- | --- |
 | Windows | x64 | `@teamsillybees/blip-win32-x64` |
-| Windows | ARM64 | `@teamsillybees/blip-win32-arm64` |
-| Linux | x64 | `@teamsillybees/blip-linux-x64` |
-| Linux | ARM64 | `@teamsillybees/blip-linux-arm64` |
-| macOS | Intel | `@teamsillybees/blip-darwin-x64` |
-| macOS | Apple Silicon | `@teamsillybees/blip-darwin-arm64` |
 
-也可单独构建，例如 `npm run build:npm -- --target darwin-arm64`。这些是分发构建目标；Codex 接入的首版实机验收仍以 Windows 为准。
+也可显式指定 `npm run build:npm -- --target win32-x64`。不再接受 macOS、Linux 或 Windows ARM64 的 npm 构建目标；启动器声明 `os: ["win32"]` 和 `cpu: ["x64"]`，npm 会在不支持的平台上拒绝安装。
 
 ## 配置和升级
 
@@ -65,12 +60,11 @@ npm run test:npm-install
 
 发布时，根 `package.json` 与 `npm/blip/package.json` 的版本必须一致，启动器的全部原生可选依赖也必须指向同一版本。打包命令将该版本写入 Go 可执行文件，生成 `dist/npm/manifest.json` 记录各 tarball 和完整性哈希。
 
-具备 `@teamsillybees` scope 发布权限后，先发布六个原生包，再发布启动器包。正式版本使用 `latest` 标签，例如：
+具备 `@teamsillybees` scope 发布权限后，先发布 Windows x64 原生包，再发布启动器包。仅发布本次 `manifest.json` 中列出的两个包，不使用可能包含历史构建的目录通配符。正式版本使用 `latest` 标签，例如：
 
 ```powershell
-npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.0.tgz --access public --tag latest
-# 按相同方式发布其余五个原生包，最后发布启动器：
-npm publish ./dist/npm/teamsillybees-blip-0.2.0.tgz --access public --tag latest
+npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.2.1.tgz --access public --tag latest
+npm publish ./dist/npm/teamsillybees-blip-0.2.1.tgz --access public --tag latest
 ```
 
-正式版本的 `latest` 指向 `0.2.0`。预发行版本单独使用 `next` 标签；已有的 `0.2.0-dev.0` 仍可通过 `@next` 安装。仓库脚本不会自动执行 publish。
+正式版本的 `latest` 指向 `0.2.1`。预发行版本单独使用 `next` 标签；主包和 Windows x64 包保留历史版本，已有的 `0.2.0-dev.0` 仍可在 Windows x64 上通过 `@next` 安装。仓库脚本不会自动执行 publish。

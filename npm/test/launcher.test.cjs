@@ -7,7 +7,7 @@ const { targets, getTarget } = require('../blip/lib/platforms.cjs');
 const { resolveBinary, run } = require('../blip/lib/launcher.cjs');
 const manifest = require('../blip/package.json');
 
-function fixture(platform = 'linux') {
+function fixture(platform = 'win32') {
   const runtime = new EventEmitter();
   Object.assign(runtime, { platform, arch: 'x64', pid: 4242, exitCode: undefined });
   let stderr = '';
@@ -28,22 +28,21 @@ function fixture(platform = 'linux') {
   };
 }
 
-test('every supported Node platform maps to its Go target and exact optional dependency', () => {
-  assert.equal(targets.length, 6);
-  for (const platform of ['darwin', 'linux', 'win32']) {
-    for (const arch of ['x64', 'arm64']) {
-      const target = getTarget(platform, arch);
-      assert.equal(target.packageName, `@teamsillybees/blip-${platform}-${arch}`);
-      assert.equal(target.goos, platform === 'win32' ? 'windows' : platform);
-      assert.equal(target.goarch, arch === 'x64' ? 'amd64' : 'arm64');
-      assert.equal(target.binary, platform === 'win32' ? 'blip.exe' : 'blip');
-      assert.equal(manifest.optionalDependencies[target.packageName], manifest.version);
-    }
-  }
+test('npm distribution supports only Windows x64 with an exact native dependency', () => {
+  assert.equal(targets.length, 1);
+  const target = getTarget('win32', 'x64');
+  assert.equal(target.goos, 'windows');
+  assert.equal(target.goarch, 'amd64');
+  assert.equal(target.binary, 'blip.exe');
+  assert.deepEqual(manifest.os, ['win32']);
+  assert.deepEqual(manifest.cpu, ['x64']);
+  assert.deepEqual(manifest.optionalDependencies, { '@teamsillybees/blip-win32-x64': manifest.version });
 });
 
-test('unsupported architectures fail with a useful supported-platform list', () => {
-  assert.throws(() => getTarget('linux', 'ia32'), /linux\/ia32.*Supported platforms:.*linux-x64/);
+test('retired platforms and unsupported architectures fail with a useful supported-platform list', () => {
+  for (const [platform, arch] of [['darwin', 'arm64'], ['darwin', 'x64'], ['linux', 'arm64'], ['linux', 'x64'], ['win32', 'arm64'], ['win32', 'ia32']]) {
+    assert.throws(() => getTarget(platform, arch), new RegExp(`${platform}/${arch}.*Supported platforms: win32-x64\\.`));
+  }
   const state = fixture('freebsd');
   run([], state.dependencies);
   assert.equal(state.runtime.exitCode, 1);
@@ -53,8 +52,8 @@ test('unsupported architectures fail with a useful supported-platform list', () 
 
 test('binary resolution chooses the platform-specific executable', () => {
   let request;
-  const binary = resolveBinary('win32', 'arm64', (name) => { request = name; return 'C:\\bin\\blip.exe'; });
-  assert.equal(request, '@teamsillybees/blip-win32-arm64/bin/blip.exe');
+  const binary = resolveBinary('win32', 'x64', (name) => { request = name; return 'C:\\bin\\blip.exe'; });
+  assert.equal(request, '@teamsillybees/blip-win32-x64/bin/blip.exe');
   assert.equal(binary, 'C:\\bin\\blip.exe');
 });
 
@@ -64,7 +63,7 @@ test('missing optional dependencies explain how to recover', () => {
   run([], state.dependencies);
   assert.equal(state.runtime.exitCode, 1);
   assert.equal(state.calls.length, 0);
-  assert.ok(state.stderr.includes(`@teamsillybees/blip-linux-x64@${manifest.version} is missing`));
+  assert.ok(state.stderr.includes(`@teamsillybees/blip-win32-x64@${manifest.version} is missing`));
   assert.match(state.stderr, /--include=optional/);
   assert.doesNotMatch(state.stderr, /at resolveBinary/);
 });
@@ -79,13 +78,13 @@ test('passes arguments literally and inherits all terminal handles', () => {
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) assert.equal(state.runtime.listenerCount(signal), 0);
 });
 
-test('forwards termination signals and preserves POSIX signal termination', () => {
+test('forwards termination signals and preserves the Windows exit code', () => {
   const state = fixture();
   run([], state.dependencies);
   state.runtime.emit('SIGTERM');
   assert.deepEqual(state.kills, [['child', 'SIGTERM']]);
   state.child.emit('exit', null, 'SIGTERM');
-  assert.deepEqual(state.kills, [['child', 'SIGTERM'], [4242, 'SIGTERM']]);
+  assert.deepEqual(state.kills, [['child', 'SIGTERM']]);
   assert.equal(state.runtime.exitCode, 143);
   assert.equal(state.runtime.listenerCount('SIGTERM'), 0);
 });
