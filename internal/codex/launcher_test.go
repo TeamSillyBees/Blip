@@ -76,6 +76,10 @@ func TestLauncherForwardsNativeArgumentsStdinAndUpgrade(t *testing.T) {
 	binary := readBytes(t, exe)
 	capturePath := filepath.Join(t.TempDir(), "capture.json")
 	workdir := t.TempDir()
+	expectedCwd, err := os.Stat(workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	payload := []byte(`{"questions":["选择？ & %PATH% !"],"padding":"` + strings.Repeat("abc", 50000) + `"}`)
 	var firstCommands []string
 	var oldBinary string
@@ -110,7 +114,13 @@ func TestLauncherForwardsNativeArgumentsStdinAndUpgrade(t *testing.T) {
 			t.Fatalf("launcher did not execute native target: %v", err)
 		}
 		want := []string{path, "--config", c.Path, "hook", "--source", "work"}
-		if !reflect.DeepEqual(got.Args, want) || !bytes.Equal(got.Payload, payload) || got.Cwd != workdir {
+		actualCwd, err := os.Stat(got.Cwd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// macOS resolves /var to /private/var in the child. Check directory
+		// identity so equivalent paths still verify that cwd was preserved.
+		if !reflect.DeepEqual(got.Args, want) || !bytes.Equal(got.Payload, payload) || !os.SameFile(expectedCwd, actualCwd) {
 			t.Fatalf("arguments/cwd/stdin changed: args=%q cwd=%q payload matches=%v", got.Args, got.Cwd, bytes.Equal(got.Payload, payload))
 		}
 		if err := os.Remove(capturePath); err != nil {
