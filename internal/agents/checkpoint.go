@@ -95,6 +95,9 @@ func CheckSourceCheckpoint(ctx context.Context, c config.Config, s config.Source
 	root := StateDir(c, s)
 	valid := false
 	switch f.Kind {
+	case antigravityCheckpoint:
+		_, readErr := readAntigravityCursor(filepath.Join(root, "summaries.json"))
+		valid = s.Harness == "antigravity" && f.Key == event.ID(antigravityCheckpoint) && readErr == nil
 	case "codex-rollout":
 		valid = s.Harness == "codex" && f.Key == event.ID("codex-rollout") && codex.ValidateCheckpoint(filepath.Join(root, "rollout-cursors.json")) == nil
 	case "handoff":

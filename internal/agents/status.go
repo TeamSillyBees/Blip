@@ -46,6 +46,8 @@ func Inspect(c config.Config, s config.Source) SourceStatus {
 	}
 	if installer, ok := adapter.(Installer); ok {
 		status.Installation = installer.InstallationStatus()
+	} else if _, ok := adapter.(Collector); ok {
+		status.Installation = "not_required"
 	}
 	RefreshHookDiagnostic(c, &status)
 	ApplyHookHealth(&status)

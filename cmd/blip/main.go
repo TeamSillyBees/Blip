@@ -137,7 +137,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		parent := &cobra.Command{Use: action, Short: verb + "编程助手接入", Args: noArgs,
 			RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 		}
-		for harness := range agents.Builtins() {
+		for _, harness := range agents.Builtins().InstallableHarnesses() {
 			var sourceID string
 			child := &cobra.Command{
 				Use: harness, Short: verb + " " + harness + " 的 Blip 通知钩子", Args: noArgs,

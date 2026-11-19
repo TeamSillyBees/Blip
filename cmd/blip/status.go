@@ -92,7 +92,7 @@ func printStatusText(c config.Config, output io.Writer) error {
 		}
 		if source.Enabled && (installation == "not_installed" || installation == "missing_configuration") {
 			fmt.Fprintln(output, "  安装接入：", cliCommand(c.Path, "install", source.Harness, "--source", source.ID))
-		} else if source.Enabled && installation != "configured_unverified" {
+		} else if source.Enabled && installation != "configured_unverified" && installation != "not_required" {
 			fmt.Fprintln(output, "  接入状态：", installation)
 			fmt.Fprintln(output, "  检查接入：", cliCommand(c.Path, "doctor", "--source", source.ID))
 		}

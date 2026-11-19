@@ -18,7 +18,7 @@ func TestChineseHelpAcrossCommandTree(t *testing.T) {
 	commands := []string{"", "help", "configure", "config", "setup", "init", "start", "stop", "restart", "run", "status", "test", "doctor", "hook", "version", "sources", "service", "completion"}
 	for _, action := range []string{"install", "uninstall"} {
 		commands = append(commands, action)
-		for harness := range agents.Builtins() {
+		for _, harness := range agents.Builtins().InstallableHarnesses() {
 			commands = append(commands, action+" "+harness)
 		}
 	}

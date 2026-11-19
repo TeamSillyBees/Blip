@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package blip.antigravity;
+option go_package = "github.com/TeamSillyBees/Blip/internal/antigravity";
+
+// Read-only projection of CascadeTrajectorySummary in conversation_summaries.raw_summary.
+// Field numbers come from the descriptors shipped with agy 1.5.9 and Antigravity 2.32.2.
+message Summary {
+  string trajectory_id = 4;
+  repeated WaitingStep waiting_steps = 8;
+  bool interrupted = 25;
+  uint32 latest_executor_termination_reason = 28;
+}
+
+message WaitingStep {
+  Step step = 1;
+  uint32 step_index = 2;
+}
+
+message Step {
+  uint32 status = 4;
+  StepMetadata metadata = 5;
+  Interaction requested_interaction = 56;
+  NotifyUser notify_user = 94;
+}
+
+message StepMetadata {
+  ToolCall tool_call = 4;
+}
+
+message ToolCall {
+  string id = 1;
+  string name = 2;
+}
+
+// Only the presence of an approval is needed. Leave its command, arguments,
+// and permission rules opaque. Older clients have tool-specific approvals.
+message Interaction {
+  Approval run_command = 3;
+  Approval mcp = 18;
+  Approval file_permission = 19;
+  Elicitation elicitation = 20;
+  Approval permission = 21;
+  AskQuestion ask_question = 22;
+  Approval approval_interaction = 23;
+}
+
+message Approval {}
+
+message NotifyUser {
+  string notification_content = 2;
+  bool is_blocking = 3;
+  bool should_auto_proceed = 8;
+}
+
+message Elicitation {
+  string message = 3;
+}
+
+message AskQuestion {
+  repeated Question questions = 1;
+}
+
+message Question {
+  string question = 1;
+  repeated Option options = 2;
+}
+
+message Option {
+  string text = 2;
+}

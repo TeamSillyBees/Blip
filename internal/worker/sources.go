@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
@@ -50,6 +51,9 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 	if !ok {
 		report(sourceUpdate{state: "ready"})
 		return
+	}
+	if closer, ok := collector.(io.Closer); ok {
+		defer closer.Close()
 	}
 	for {
 		update := sourceUpdate{state: "ready"}

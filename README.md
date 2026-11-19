@@ -21,7 +21,7 @@
   <a href="https://github.com/TeamSillyBees/Blip/issues">反馈问题</a>
 </p>
 
-Blip 是一个本地运行的编程助手通知工具，接入 **Codex CLI 与桌面版、Claude Code、Hermes 和 DSH**，支持 **飞书、企业微信、Gotify 与自定义 Webhook**。
+Blip 是一个本地运行的编程助手通知工具，接入 **Codex CLI 与桌面版、Antigravity 与 agy CLI、Claude Code、Hermes 和 DSH**，支持 **飞书、企业微信、Gotify 与自定义 Webhook**。
 
 - **在关键时刻提醒**：本轮结束、需要回答问题或发起审批申请时，通知你回来处理。
 - **消息带上上下文**：项目、设备、对话名和事件时间；提问附选项，完成通知可附最后一条回复。
@@ -53,7 +53,7 @@ blip
 
 ### 2. 配置通知渠道
 
-在终端向导中添加通知目的地，填写地址和必要凭据，然后选择 **保存并启动**。Blip 会保存配置、安装已启用来源的 Hook、启动或重启通知进程，并逐个测试渠道投递。
+在终端向导中添加通知目的地，填写地址和必要凭据，然后选择 **保存并启动**。Blip 会保存配置，为需要 Hook 的来源安装接入，启动或重启通知进程，并逐个测试渠道投递。
 
 首次配置默认接入 Codex；其他编程助手和多个 Codex home 的接入方式见下方[编程助手](#支持的编程助手)。已有 Windows 服务时，请在管理员终端应用配置。
 
@@ -76,6 +76,7 @@ blip status
 | 编程助手 | 接入方式 | 使用说明 |
 | --- | --- | --- |
 | **Codex CLI / 桌面版** | Hook + 本地会话日志；支持多个独立 home | 默认接入，[多来源配置](docs/sources.md) |
+| **Antigravity / agy CLI** | 只读监听会话摘要，提醒本轮结束、等待回复或等待授权 | [接入 Antigravity](docs/antigravity.md) |
 | **Claude Code** | 原生 Hooks，处理停止、提问与审批申请 | [接入 Claude Code](docs/claude-code.md) |
 | **Hermes** | Profile 的 shell hooks | [接入 Hermes](docs/hermes.md) |
 | **DSH · DeepSeek Harness** | 本地 Cordis 插件，观察原生会话与提问事件 | [接入 DSH](docs/dsh.md) |

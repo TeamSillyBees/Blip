@@ -115,6 +115,8 @@ var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 func (e Event) AgentName() string {
 	switch e.Agent {
+	case "antigravity":
+		return "Antigravity"
 	case "", "codex":
 		return "Codex"
 	case "claude-code":

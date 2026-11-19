@@ -13,7 +13,7 @@ func WriteJSON(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	return WriteFile(path, append(data, '\n'))
+	return writeFile(path, append(data, '\n'), 0600, publishSnapshot)
 }
 
 func WriteFile(path string, data []byte) error {
@@ -23,6 +23,10 @@ func WriteFile(path string, data []byte) error {
 // WriteFileMode preserves an existing external settings file's Unix mode while
 // publishing atomically. Internal state continues to use private mode 0600.
 func WriteFileMode(path string, data []byte, mode os.FileMode) error {
+	return writeFile(path, data, mode, os.Rename)
+}
+
+func writeFile(path string, data []byte, mode os.FileMode, publish func(string, string) error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
@@ -45,7 +49,7 @@ func WriteFileMode(path string, data []byte, mode os.FileMode) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err = os.Rename(name, path); err != nil {
+	if err = publish(name, path); err != nil {
 		return fmt.Errorf("publish local state: %w", err)
 	}
 	return nil

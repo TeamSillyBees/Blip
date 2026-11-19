@@ -2,7 +2,7 @@
 
 一个 source 表示一个 harness 的独立配置位置。`id` 是永久身份；`harness` 选择内置 adapter；`home` 定位配置与日志；`event_version` 决定新通知的协议版本。模型名称不影响 adapter，例如在 Claude Code 中使用 DeepSeek 模型仍属于 Claude Code。
 
-当前公共层已支持来源隔离，Codex adapter 可使用多个 home，并可接入 [Claude Code](claude-code.md)、[Hermes](hermes.md) 和 [DSH](dsh.md)。各 harness 的实测范围见 [兼容性记录](compatibility.md)。
+Codex adapter 可使用多个 home。其他内置来源包括 [Antigravity 与 agy CLI](antigravity.md)、[Claude Code](claude-code.md)、[Hermes](hermes.md) 和 [DSH](dsh.md)。各 harness 的实测范围见 [兼容性记录](compatibility.md)。
 
 ## 旧配置
 

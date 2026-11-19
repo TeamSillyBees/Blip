@@ -125,7 +125,7 @@ func newSourcesCommand(path *string) *cobra.Command {
 			_ = command.MarkFlagRequired("source")
 		}
 		if action == "add" {
-			command.Flags().StringVar(&harness, "harness", "", "编程助手类型：codex、claude-code、dsh 或 hermes（必填）")
+			command.Flags().StringVar(&harness, "harness", "", "编程助手类型：antigravity（含 agy CLI）、codex、claude-code、dsh 或 hermes（必填）")
 			command.Flags().StringVar(&home, "home", "", "编程助手配置目录（必填）")
 			command.Flags().IntVar(&eventVersion, "event-version", 2, "事件协议版本：1 或 2")
 			_ = command.MarkFlagRequired("harness")

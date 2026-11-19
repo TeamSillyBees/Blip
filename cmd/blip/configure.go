@@ -37,7 +37,11 @@ func configure(ctx context.Context, path string, input io.Reader, output io.Writ
 		return nil
 	}
 	for _, source := range c.EffectiveSources() {
-		if source.Enabled && agents.Inspect(c, source).Installation != "configured_unverified" {
+		if !source.Enabled {
+			continue
+		}
+		installation := agents.Inspect(c, source).Installation
+		if installation != "configured_unverified" && installation != "not_required" {
 			fmt.Fprintln(output, "安装接入：", cliCommand(path, "install", source.Harness, "--source", source.ID))
 		}
 	}
@@ -65,6 +69,13 @@ func applyConfiguration(ctx context.Context, path string, output io.Writer) erro
 	}
 	for _, source := range c.EffectiveSources() {
 		if !source.Enabled {
+			continue
+		}
+		adapter, err := agents.Builtins().Open(c, source)
+		if err != nil {
+			return fmt.Errorf("接入 %s：%w", source.ID, err)
+		}
+		if _, ok := adapter.(agents.Installer); !ok {
 			continue
 		}
 		// Installation is idempotent and also refreshes a moved/upgraded binary.

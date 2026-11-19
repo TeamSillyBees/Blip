@@ -120,7 +120,7 @@ func (c *controller) run(ctx context.Context, save func() error) error {
 		if len(c.working.Enabled()) > 0 {
 			choices = append([]Choice{{"保存并启动（发送测试通知）", "apply"}}, choices...)
 			initial = "apply"
-			description += "\n保存并启动会安装已启用来源的 hook，并启动或重启 Blip。"
+			description += "\n保存并启动会为需要 hook 的来源安装接入，并启动或重启 Blip。"
 		}
 		choices = append(choices, Choice{"仅保存并退出", "save"}, Choice{"取消，不保存", "cancel"})
 		action, err := c.prompts.Select(ctx, "通知渠道配置", description, choices, initial)

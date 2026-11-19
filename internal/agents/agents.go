@@ -55,7 +55,18 @@ type Factory func(config.Config, config.Source) Adapter
 type Registry map[string]Factory
 
 func Builtins() Registry {
-	return Registry{"codex": newCodex, "claude-code": newClaude, "hermes": newHermes, "dsh": newDSH}
+	return Registry{"antigravity": newAntigravity, "codex": newCodex, "claude-code": newClaude, "hermes": newHermes, "dsh": newDSH}
+}
+
+// InstallableHarnesses lists the built-ins that register hooks or plugins.
+func (r Registry) InstallableHarnesses() []string {
+	var names []string
+	for name, factory := range r {
+		if _, ok := factory(config.Config{}, config.Source{Harness: name}).(Installer); ok {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func (r Registry) Open(c config.Config, source config.Source) (Adapter, error) {

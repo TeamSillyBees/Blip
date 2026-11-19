@@ -168,6 +168,11 @@ CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失
 - Codex 的原生 `task_complete.last_agent_message` 在 v1/v2 路径中均会保留。当前 Hermes、DSH 完成事件没有回复正文；Claude Stop 是中性停止提醒，此次未改变这些来源的事件判定或内容采集。
 - 模板和本机 HTTP 回归验证最后回复投递、换行保留、空白省略及 Unicode 截断。Go 测试、静态检查和本地 npm 打包/安装验证通过；`0.2.0-dev.6` 尚未发布。
 
+## Antigravity 与 agy CLI（2026-11-19，0.3.0）
+
+- Windows 上使用 agy CLI 1.5.9 和本地模拟模型，分别触发正常结束、带两个选项的提问和普通命令的权限请求。Blip 后台进程从实际数据库采集，经本地持久队列将三类事件投递至回环 HTTP Webhook。
+- 已核对 Antigravity App 2.32.2 的数据库和消息字段。桌面端的交互弹窗与外部通知渠道未做端到端实测。来源使用事件 v2，覆盖范围见[接入说明](antigravity.md)和[采样记录](../internal/agents/testdata/antigravity/README.md)。
+
 ## 一手资料
 
 - [Codex Hooks](https://learn.chatgpt.com/docs/hooks)：事件、信任机制、工具覆盖、默认启用与 commandWindows。
