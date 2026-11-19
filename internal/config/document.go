@@ -33,6 +33,9 @@ type Document struct {
 	initial  Config
 }
 
+// Exists reports whether the editor opened or saved an on-disk configuration.
+func (d *Document) Exists() bool { return d.existed }
+
 // OpenDocument reads a configuration for editing. A missing file starts with
 // schema 1 and an empty destination list; runtime defaults remain omitted.
 func OpenDocument(path string) (*Document, error) {
@@ -163,6 +166,14 @@ func (d *Document) validate() error {
 
 // Validate checks a staged edit without publishing it.
 func (d *Document) Validate() error { return d.validate() }
+
+// RuntimeConfig resolves a staged edit without rewriting its relative paths on disk.
+func (d *Document) RuntimeConfig(defaults RuntimeDefaults) (Config, error) {
+	if err := d.Validate(); err != nil {
+		return Config{}, err
+	}
+	return d.Config.Clone().resolve(true, defaults)
+}
 
 func sameConfig(a, b Config) bool {
 	a.Path, b.Path = "", ""

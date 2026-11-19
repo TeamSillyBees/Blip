@@ -32,7 +32,7 @@ func TestSourceCommandsMigrateDisableRemoveAndKeepBinding(t *testing.T) {
 	if err != nil || c.SchemaVersion != 2 || len(c.Sources) != 2 || c.Sources[0].EventVersion != 1 {
 		t.Fatalf("migration failed: %+v %v", c, err)
 	}
-	call("install", "codex", "--source", "work")
+	call("install", "codex", "--source", "work", "--register-only")
 	var doc map[string]any
 	if err = json.Unmarshal([]byte(call("doctor", "--source", "work")), &doc); err != nil {
 		t.Fatal(err)

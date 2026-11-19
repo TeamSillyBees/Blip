@@ -50,7 +50,7 @@ func newSourcesCommand(path *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err = doc.MigrateSources(); err != nil {
+			if err = doc.MigrateSources(config.RuntimeDefaults{}); err != nil {
 				return err
 			}
 			index := -1
@@ -116,8 +116,12 @@ func newSourcesCommand(path *string) *cobra.Command {
 			if err = doc.Save(command.Context()); err != nil {
 				return err
 			}
-			fmt.Fprintln(command.OutOrStdout(), "来源配置已保存。加载变更：", cliCommand(*path, "restart"))
-			fmt.Fprintln(command.OutOrStdout(), "Windows 服务的来源读取目录发生变化时，仍需重新安装服务。")
+			if action == "add" || action == "enable" {
+				source, _ := doc.Config.Source(id)
+				fmt.Fprintln(command.OutOrStdout(), "来源配置已保存。安装接入并启动监听：", cliCommand(*path, "install", source.Harness, "--source", id))
+			} else {
+				fmt.Fprintln(command.OutOrStdout(), "来源配置已保存。加载变更：", cliCommand(*path, "restart"))
+			}
 			return nil
 		}}
 		if action != "migrate" {

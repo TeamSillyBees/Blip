@@ -128,7 +128,7 @@ func localizeHelp(root *cobra.Command) {
 		case "help":
 			command.Use = "help [命令]"
 			command.Short = "查看命令的帮助信息"
-			command.Long = "查看任意命令的详细说明。\n例如：blip help service install 或 blip service install --help。"
+			command.Long = "查看任意命令的详细说明。\n运行 blip help install 或 blip install --help 可查看支持的客户端。"
 			command.Run = nil
 			command.RunE = func(command *cobra.Command, args []string) error {
 				target, remaining, err := root.Find(args)

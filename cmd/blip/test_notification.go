@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"time"
 
 	"github.com/TeamSillyBees/Blip/internal/config"
@@ -22,7 +21,7 @@ func sendTest(ctx context.Context, c config.Config, output io.Writer) error {
 		return err
 	}
 	if !running {
-		if err := manageLifecycle(ctx, c, "start", output); err != nil {
+		if err := manageLifecycle(ctx, c.Path, "start", output); err != nil {
 			return err
 		}
 	}
@@ -52,9 +51,10 @@ func enqueueTest(ctx context.Context, c config.Config) (string, error) {
 }
 
 func waitForTest(ctx context.Context, c config.Config, id string, output io.Writer) error {
+	queue := store.Queue{Dir: c.StateDir}
 	for {
-		var job store.Job
-		if err := store.ReadJSON(filepath.Join(c.StateDir, "jobs", id+".json"), &job); err != nil {
+		job, err := queue.ReadJob(id)
+		if err != nil {
 			return fmt.Errorf("读取测试投递结果失败；查看 %s：%w", cliCommand(c.Path, "status"), err)
 		}
 		settled := len(job.Deliveries) > 0

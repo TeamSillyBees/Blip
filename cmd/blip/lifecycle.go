@@ -25,30 +25,41 @@ type lifecycle struct {
 
 var errStopPending = errors.New("通知进程仍在停止中")
 
-func manageLifecycle(ctx context.Context, c config.Config, action string, output io.Writer) error {
+func manageLifecycle(ctx context.Context, path, action string, output io.Writer) error {
 	m := lifecycle{query: service.Query, startService: service.Start, stopService: service.Stop, startWorker: start, stopWorker: stop}
-	return m.run(ctx, c, action, output)
+	return m.run(ctx, path, action, output)
 }
 
-func (m lifecycle) run(ctx context.Context, c config.Config, action string, output io.Writer) error {
+func (m lifecycle) run(ctx context.Context, path, action string, output io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if action != "start" && action != "stop" && action != "restart" {
 		return fmt.Errorf("未知的进程管理操作 %q", action)
 	}
-	status, err := m.query(c.Path)
+	status, err := m.query(path)
 	if err != nil && !errors.Is(err, service.ErrUnsupported) {
+		return err
+	}
+	// SCM can stop a registered service even when its config needs repair.
+	// Validate before starting or interrupting a working service on restart.
+	var c config.Config
+	if action != "stop" {
+		c, err = config.ReadWithDefaults(path, status.Defaults)
+	} else if !status.Installed {
+		c, err = config.ReadLocal(path)
+	}
+	if err != nil {
 		return err
 	}
 	if status.Installed {
 		if action == "stop" || action == "restart" {
-			if err := m.stopService(ctx, c.Path); err != nil {
+			if err := m.stopService(ctx, path); err != nil {
 				return err
 			}
 		}
 		if action == "start" || action == "restart" {
-			if err := m.startService(ctx, c.Path); err != nil {
+			if err := m.startService(ctx, path); err != nil {
 				return err
 			}
 		}
@@ -61,6 +72,10 @@ func (m lifecycle) run(ctx context.Context, c config.Config, action string, outp
 			stopOutput = io.Discard
 		}
 		if err := m.stopWorker(ctx, c, stopOutput); err != nil {
+			if action == "stop" && errors.Is(err, errStopPending) {
+				fmt.Fprintln(output, "已请求停止，通知进程正在完成当前操作。")
+				return nil
+			}
 			return err
 		}
 	}

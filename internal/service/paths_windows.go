@@ -104,13 +104,7 @@ func makeInstallMetadata(opts InstallOptions) (installMetadata, string, error) {
 			if !s.Enabled {
 				continue
 			}
-			a, openErr := agents.Builtins().Open(config.Config{Path: opts.ConfigPath, StateDir: opts.StateDir}, *s)
-			if openErr != nil {
-				continue
-			}
-			if reader, ok := a.(agents.FileReader); ok {
-				m.ReadPaths = append(m.ReadPaths, reader.ReadPaths()...)
-			}
+			m.ReadPaths = append(m.ReadPaths, sourceReadPaths(config.Config{Path: opts.ConfigPath, StateDir: opts.StateDir}, *s)...)
 		}
 		if err = validateReadPaths(m); err != nil {
 			return m, "", err
@@ -120,6 +114,17 @@ func makeInstallMetadata(opts InstallOptions) (installMetadata, string, error) {
 		return m, "", fmt.Errorf("install from the regular Blip CLI, not the managed service copy")
 	}
 	return m, opts.Executable, nil
+}
+
+func sourceReadPaths(c config.Config, source config.Source) []agents.ReadPath {
+	a, err := agents.Builtins().Open(c, source)
+	if err != nil {
+		return nil
+	}
+	if reader, ok := a.(agents.FileReader); ok {
+		return reader.ReadPaths()
+	}
+	return nil
 }
 
 func serviceArguments(m installMetadata) []string {

@@ -37,7 +37,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	root := &cobra.Command{
 		Use:           "blip",
 		Short:         "在编程助手完成一轮响应或需要输入时发送通知",
-		Long:          "Blip 在编程助手完成一轮响应或需要你输入时发送通知。\n首次使用：直接运行 blip，填写通知渠道后选择“保存并启动”。",
+		Long:          "Blip 在编程助手完成一轮响应或需要你输入时发送通知。\n使用 blip install <客户端> 开启监听。直接运行 blip 可配置通知渠道。",
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -81,9 +81,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	root.SetVersionTemplate("{{.Version}}\n")
 	for _, entry := range []struct{ name, description string }{
 		{"init", "生成配置示例，供脚本或手动编辑"},
-		{"start", "启动普通后台通知进程"},
-		{"stop", "请求平稳停止通知进程"},
-		{"restart", "重启并加载最新配置（自动识别 Windows 服务）"},
+		{"start", "启动通知监听（优先启动已注册的 Windows 服务）"},
+		{"stop", "平稳停止通知监听（优先停止已注册的 Windows 服务）"},
+		{"restart", "重新加载配置并重启监听（优先重启已注册的 Windows 服务）"},
 		{"run", "在当前终端运行通知进程"},
 		{"status", "查看运行状态和投递结果"},
 		{"test", "测试通知；终端检查投递，脚本默认仅入队"},
@@ -132,34 +132,32 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		}
 		root.AddCommand(command)
 	}
-	for _, action := range []string{"install", "uninstall"} {
-		verb := map[string]string{"install": "安装", "uninstall": "卸载"}[action]
-		parent := &cobra.Command{Use: action, Short: verb + "编程助手接入", Args: noArgs,
-			RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
-		}
-		for _, harness := range agents.Builtins().InstallableHarnesses() {
-			var sourceID string
-			child := &cobra.Command{
-				Use: harness, Short: verb + " " + harness + " 的 Blip 通知钩子", Args: noArgs,
-				RunE: func(command *cobra.Command, _ []string) error {
-					if sourceID == "" {
-						c, err := config.ReadLocal(path)
-						if err != nil {
-							return err
-						}
-						sourceID, err = inferSource(c, harness)
-						if err != nil {
-							return err
-						}
-					}
-					return execute(command.Context(), path, []string{command.Parent().Name(), harness, sourceID}, command.InOrStdin(), command.OutOrStdout())
-				},
-			}
-			child.Flags().StringVar(&sourceID, "source", "", "已配置的来源 ID")
-			parent.AddCommand(child)
-		}
-		root.AddCommand(parent)
+	root.AddCommand(newInstallCommand(&path))
+	uninstall := &cobra.Command{Use: "uninstall", Short: "卸载编程助手接入", Args: noArgs,
+		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 	}
+	for _, harness := range agents.Builtins().InstallableHarnesses() {
+		var sourceID string
+		child := &cobra.Command{
+			Use: harness, Short: "卸载 " + harness + " 的 Blip 通知钩子", Args: noArgs,
+			RunE: func(command *cobra.Command, _ []string) error {
+				if sourceID == "" {
+					c, err := config.ReadLocal(path)
+					if err != nil {
+						return err
+					}
+					sourceID, err = inferSource(c, harness)
+					if err != nil {
+						return err
+					}
+				}
+				return execute(command.Context(), path, []string{command.Parent().Name(), harness, sourceID}, command.InOrStdin(), command.OutOrStdout())
+			},
+		}
+		child.Flags().StringVar(&sourceID, "source", "", "已配置的来源 ID")
+		uninstall.AddCommand(child)
+	}
+	root.AddCommand(uninstall)
 	configureCommand := &cobra.Command{
 		Use: "configure", Aliases: []string{"config", "setup"},
 		Short: "配置渠道，一次完成接入、启动和测试",
@@ -179,7 +177,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	root.AddGroup(&cobra.Group{ID: "common", Title: "常用操作："}, &cobra.Group{ID: "advanced", Title: "接入与维护："})
 	for _, command := range root.Commands() {
 		switch command.Name() {
-		case "configure", "start", "stop", "restart", "status", "test":
+		case "configure", "install", "start", "stop", "restart", "status", "test":
 			command.GroupID = "common"
 		default:
 			command.GroupID = "advanced"
@@ -218,8 +216,12 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		fmt.Fprintln(output, "配置已创建：", absolute)
 		return nil
 	}
+	switch command[0] {
+	case "start", "stop", "restart":
+		return manageLifecycle(ctx, path, command[0], output)
+	}
 	var c config.Config
-	if command[0] == "start" || command[0] == "run" || command[0] == "restart" {
+	if command[0] == "run" {
 		c, err = config.Read(path)
 	} else {
 		c, err = config.ReadLocal(path)
@@ -238,7 +240,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		}
 		_ = agents.Capture(ctx, c, id, input)
 		return nil // Notification failures cannot approve, deny, or block an agent operation.
-	case "install", "uninstall":
+	case "uninstall":
 		if len(command) < 2 {
 			return fmt.Errorf("请指定编程助手类型")
 		}
@@ -246,16 +248,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		if len(command) > 2 {
 			id = command[2]
 		}
-		var source config.Source
-		if command[0] == "uninstall" {
-			source, err = agents.InstalledSource(c, id)
-		} else {
-			var ok bool
-			source, ok = c.Source(id)
-			if !ok {
-				err = fmt.Errorf("尚未配置来源 %q", id)
-			}
-		}
+		source, err := agents.InstalledSource(c, id)
 		if err != nil {
 			return err
 		}
@@ -270,52 +263,13 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		if !ok {
 			return fmt.Errorf("此来源不支持自动安装接入")
 		}
-		if command[0] == "install" {
-			if err = agents.Bind(ctx, c, source); err != nil {
-				return err
-			}
-			executable, exeErr := os.Executable()
-			if exeErr != nil {
-				return exeErr
-			}
-			err = installer.Install(ctx, executable)
-		} else {
-			err = installer.Uninstall(ctx)
-		}
-		if err != nil {
+		if err := installer.Uninstall(ctx); err != nil {
 			return err
 		}
-		if command[0] == "install" {
-			if source.Harness == "codex" {
-				fmt.Fprintf(output, "codex 接入已安装（%s）。首次安装、迁移或钩子定义变化时，请在 Codex 中审阅并信任；普通升级会沿用固定入口。必要时重开已有会话。\n", source.ID)
-			} else {
-				fmt.Fprintf(output, "%s 接入已安装（%s）。请在 %s 中审阅并信任通知钩子，必要时重开已有会话。\n", source.Harness, source.ID, source.Harness)
-			}
-		} else {
-			fmt.Fprintf(output, "%s 接入已移除（%s）。配置与通知记录保留。\n", source.Harness, source.ID)
-		}
+		fmt.Fprintf(output, "%s 接入已移除（%s）。配置与通知记录保留。\n", source.Harness, source.ID)
 		return nil
 	case "run":
-		if len(c.Enabled()) == 0 {
-			return fmt.Errorf("请先启用至少一个通知目的地：%s", cliCommand(path, "configure"))
-		}
 		return worker.Run(ctx, c, log.New(os.Stderr, "Blip ", log.LstdFlags))
-	case "start":
-		return start(ctx, c, output)
-	case "stop":
-		if err := stop(ctx, c, output); errors.Is(err, errStopPending) {
-			// Keep the original request-only exit contract. Restart uses stop
-			// directly and must not launch another worker until it has exited.
-			fmt.Fprintln(output, "已请求停止，通知进程正在完成当前操作。")
-			return nil
-		} else {
-			return err
-		}
-	case "restart":
-		if len(c.Enabled()) == 0 {
-			return fmt.Errorf("请先启用至少一个通知目的地：%s", cliCommand(path, "configure"))
-		}
-		return manageLifecycle(ctx, c, "restart", output)
 	case "status":
 		return printStatus(c, output)
 	case "doctor":
@@ -349,9 +303,6 @@ func isRunning(c config.Config) (bool, error) {
 func start(ctx context.Context, c config.Config, output io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if len(c.Enabled()) == 0 {
-		return fmt.Errorf("请先启用至少一个通知目的地：%s", cliCommand(c.Path, "configure"))
 	}
 	running, err := isRunning(c)
 	if err != nil {

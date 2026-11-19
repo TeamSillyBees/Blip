@@ -16,8 +16,13 @@ import (
 
 func TestLifecycleUsesRegisteredServiceAndNeverFallsBackOnFailure(t *testing.T) {
 	failure := errors.New("access denied")
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := store.WriteJSON(path, config.Config{SchemaVersion: 2, Sources: []config.Source{}}); err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
 		name      string
+		action    string
 		installed bool
 		queryErr  error
 		stopErr   error
@@ -27,6 +32,10 @@ func TestLifecycleUsesRegisteredServiceAndNeverFallsBackOnFailure(t *testing.T) 
 		{name: "ordinary worker", want: []string{"stop worker", "start worker"}},
 		{name: "unsupported platform", queryErr: service.ErrUnsupported, want: []string{"stop worker", "start worker"}},
 		{name: "installed service", installed: true, want: []string{"stop service", "start service"}},
+		{name: "start installed service", action: "start", installed: true, want: []string{"start service"}},
+		{name: "stop installed service", action: "stop", installed: true, want: []string{"stop service"}},
+		{name: "start ordinary worker", action: "start", want: []string{"start worker"}},
+		{name: "stop ordinary worker", action: "stop", want: []string{"stop worker"}},
 		{name: "query denied", queryErr: failure, wantErr: true},
 		{name: "service stop denied", installed: true, stopErr: failure, want: []string{"stop service"}, wantErr: true},
 		{name: "worker did not stop", stopErr: failure, want: []string{"stop worker"}, wantErr: true},
@@ -46,7 +55,11 @@ func TestLifecycleUsesRegisteredServiceAndNeverFallsBackOnFailure(t *testing.T) 
 					return test.stopErr
 				},
 			}
-			err := m.run(context.Background(), config.Config{}, "restart", io.Discard)
+			action := test.action
+			if action == "" {
+				action = "restart"
+			}
+			err := m.run(context.Background(), path, action, io.Discard)
 			if (err != nil) != test.wantErr || !reflect.DeepEqual(calls, test.want) {
 				t.Fatalf("calls=%v err=%v; want calls=%v error=%v", calls, err, test.want, test.wantErr)
 			}

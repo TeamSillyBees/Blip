@@ -63,7 +63,7 @@ func TestBareCodexCommandsKeepDefaultIdentityAfterSourceRemoval(t *testing.T) {
 	call := func(args ...string) error {
 		return run(append([]string{"--config", path}, args...), strings.NewReader(""), &bytes.Buffer{})
 	}
-	for _, args := range [][]string{{"install", "codex"}, {"sources", "add", "--source", "other", "--harness", "codex", "--home", otherHome}, {"sources", "remove", "--source", config.DefaultSourceID}} {
+	for _, args := range [][]string{{"install", "codex", "--register-only"}, {"sources", "add", "--source", "other", "--harness", "codex", "--home", otherHome}, {"sources", "remove", "--source", config.DefaultSourceID}} {
 		if err := call(args...); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}

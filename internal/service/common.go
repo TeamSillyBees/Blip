@@ -30,6 +30,8 @@ type Status struct {
 	Account    string `json:"account,omitempty"`
 	Executable string `json:"executable,omitempty"`
 	ConfigPath string `json:"config_path,omitempty"`
+	// Captured profile paths are used when migrating a service's v1 config.
+	Defaults config.RuntimeDefaults `json:"-"`
 }
 
 // Name is stable for one configuration path and does not expose that path in the

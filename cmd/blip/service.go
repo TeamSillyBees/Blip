@@ -99,12 +99,9 @@ func manageService(ctx context.Context, action, path string, output io.Writer) e
 		}
 		fmt.Fprintln(output, "Windows 服务已停止。")
 	case "restart":
-		c, readErr := config.Read(absolute)
+		_, readErr := config.Read(absolute)
 		if readErr != nil {
 			return readErr
-		}
-		if len(c.Enabled()) == 0 {
-			return fmt.Errorf("请先配置并启用至少一个通知目的地：%s", cliCommand(path, "configure"))
 		}
 		if err = service.Stop(ctx, absolute); err != nil {
 			return err
@@ -154,11 +151,6 @@ func runServiceWorker(ctx context.Context, path string, defaults config.RuntimeD
 	}
 	if c.SchemaVersion == 1 && defaults.CodexHome == "" {
 		return fmt.Errorf("旧版服务配置需要原来的 Codex 配置目录；请重新安装服务")
-	}
-	if len(c.Enabled()) == 0 {
-		err = fmt.Errorf("请先启用至少一个通知目的地")
-		logger.Print(err)
-		return err
 	}
 	if err = os.MkdirAll(c.StateDir, 0700); err != nil {
 		logger.Printf("创建通知进程状态目录失败：%v", err)

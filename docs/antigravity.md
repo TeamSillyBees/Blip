@@ -4,20 +4,22 @@ Blip 只读监听 Antigravity 的本地会话摘要。本轮结束、助手提�
 
 ## 接入
 
-桌面 App 和 `agy` CLI 都使用 `antigravity` 类型。按使用的客户端添加来源，`--home` 指向包含 `conversation_summaries.db` 的数据目录。
+按使用的客户端执行对应命令。两者都用时各执行一次。Windows 使用当前账户的管理员 PowerShell。
 
 ```powershell
-blip sources add --source antigravity-app --harness antigravity --home "$env:USERPROFILE\.gemini\antigravity"
-blip sources add --source agy --harness antigravity --home "$env:USERPROFILE\.gemini\antigravity-cli"
-blip restart
-blip status
+blip install antigravity   # 桌面版
+blip install agy           # agy CLI
 ```
 
-单独使用一个客户端时，只执行对应的 `sources add`。独立 IDE 使用 `~/.gemini/antigravity-ide` 时，可为该目录另加一个来源。自定义数据目录以客户端实际写入的位置为准。
+安装命令启用对应来源并启动或重启后台监听。桌面版默认读取 `~/.gemini/antigravity`，CLI 默认读取 `~/.gemini/antigravity-cli`。已经用 `sources add` 添加过同一目录时，安装命令沿用原来源 ID 和进度。用 `blip status` 查看运行状态。
 
-无需安装 Hook。`blip doctor --source agy` 的 `installation` 为 `not_required`。如果客户端尚未创建数据库，`status` 会显示该来源的采集错误；数据库就绪后 Blip 自动重试。
+npm 版 `0.3.0` 使用 `sources add` 手动接入。可以在 `blip install --help` 中检查当前程序是否包含上述两个快捷命令。
 
-使用 Windows 服务时，新增来源后重新安装服务，以更新对数据库及已有 `-wal`、`-shm` 文件的只读权限。若客户端重建文件后服务失去访问权，可在文件就绪后重新安装服务，或使用普通用户后台进程。[Windows 服务说明](windows-service.md)
+使用自定义数据目录或单独的 `~/.gemini/antigravity-ide` 时，运行 `blip install antigravity --source my-ide --home <数据目录>`。目录应包含客户端的 `conversation_summaries.db`。
+
+Windows 首次接入自动注册并启动服务。再次接入会更新服务副本、授予所需数据库文件的读取权限并重启。若客户端首次创建或重建数据库后服务提示读取失败，再执行同一安装命令即可刷新权限。[Windows 服务说明](windows-service.md)
+
+这两种接入直接读取会话数据库。`doctor` 中的 `installation: not_required` 表示客户端无需安装 Hook。
 
 ## 提醒条件
 

@@ -3,11 +3,10 @@
 Hermes adapter 使用 profile 的 `config.yaml` shell hooks。安装到实际使用的 `HERMES_HOME` 或 profile home，不推断共享 gateway 的进程环境属于哪个会话。
 
 ```powershell
-blip sources add --source hermes-work --harness hermes --home 'D:\Agent Homes\hermes-work'
-blip install hermes --source hermes-work
-blip doctor --source hermes-work
-blip restart
+blip install hermes
 ```
+
+首次接入默认读取 `HERMES_HOME`，缺省使用 `~/.hermes`。自定义 profile 可直接运行 `blip install hermes --source hermes-work --home 'D:\Agent Homes\hermes-work'`。
 
 安装器合并 YAML 中的 hooks，保留注释、其他 hook、outbound 配置和信任设置。它不会改写 `hooks_auto_accept` 或 `shell-hooks-allowlist.json`；需在 Hermes 中审阅和授权新增命令。卸载只删除安装清单中完整匹配的条目，用户修改过的命令条目会报告冲突。
 

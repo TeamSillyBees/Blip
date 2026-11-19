@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,13 +25,13 @@ type antigravityAdapter struct {
 	source     config.Source
 	database   string
 	checkpoint string
-	db         *sqlite3.Conn
+	db         *antigravity.SummaryDB
 	file       os.FileInfo
 	version    int64
 }
 
 func newAntigravity(c config.Config, s config.Source) Adapter {
-	return &antigravityAdapter{source: s, database: filepath.Join(s.Home, "conversation_summaries.db"), checkpoint: filepath.Join(StateDir(c, s), "summaries.json")}
+	return &antigravityAdapter{source: s, database: filepath.Join(s.Home, antigravity.SummaryFilename), checkpoint: filepath.Join(StateDir(c, s), "summaries.json")}
 }
 
 func (a *antigravityAdapter) Capabilities() []Capability {
@@ -115,27 +116,17 @@ func (a *antigravityAdapter) Poll(ctx context.Context, emit func(event.Event) er
 		if err := a.Close(); err != nil {
 			return err
 		}
-		a.db, err = sqlite3.OpenFlags(a.database, sqlite3.OPEN_READONLY)
+		a.db, err = antigravity.OpenSummaryDB(ctx, a.database)
 		if err != nil {
 			return err
 		}
 		a.file = info
 	}
-	a.db.SetInterrupt(ctx)
-	defer a.db.SetInterrupt(context.Background())
 	// data_version is comparable only on the same connection. Read it before
 	// the SELECT so a concurrent commit always schedules another snapshot.
-	stmt, _, err := a.db.Prepare("PRAGMA data_version")
-	if err != nil {
-		return err
-	}
-	if !stmt.Step() {
-		err = stmt.Err()
-		_ = stmt.Close()
-		return err
-	}
-	version := stmt.ColumnInt64(0)
-	if err := stmt.Close(); err != nil {
+	var version int64
+	if err := a.db.QueryRowContext(ctx, "PRAGMA data_version").Scan(&version); err != nil {
+		_ = a.Close()
 		return err
 	}
 	if version == a.version {
@@ -153,22 +144,25 @@ func (a *antigravityAdapter) Poll(ctx context.Context, emit func(event.Event) er
 }
 
 func (a *antigravityAdapter) collect(ctx context.Context, cursor antigravityCursor, emit func(event.Event) error) error {
-	const query = `SELECT conversation_id, last_user_input_time, last_modified_time, status,
-		not_fully_idle, title, workspace_uris, raw_summary FROM conversation_summaries
+	const query = `SELECT coalesce(conversation_id, ''), +last_user_input_time, +last_modified_time, coalesce(status, ''),
+		coalesce(not_fully_idle, 0) != 0, coalesce(title, ''), coalesce(workspace_uris, ''), raw_summary FROM conversation_summaries
 		WHERE parent_conversation_id = '' AND nesting_depth = 0 AND killed = 0 AND raw_summary IS NOT NULL`
-	rows, _, err := a.db.Prepare(query)
+	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	changed := false
-	for rows.Step() {
-		if err := ctx.Err(); err != nil {
+	for rows.Next() {
+		var row antigravity.Row
+		var input, modified any
+		var raw sql.RawBytes
+		if err := rows.Scan(&row.ConversationID, &input, &modified, &row.Status, &row.NotFullyIdle, &row.Title, &row.WorkspaceURIs, &raw); err != nil {
 			return err
 		}
-		id := rows.ColumnText(0)
-		inputAt := rows.ColumnTime(1, sqlite3.TimeFormatAuto)
-		if err := rows.Err(); err != nil {
+		id := row.ConversationID
+		inputAt, err := summaryTime(input)
+		if err != nil {
 			return fmt.Errorf("invalid last_user_input_time: %w", err)
 		}
 		if inputAt.IsZero() {
@@ -181,19 +175,17 @@ func (a *antigravityAdapter) collect(ctx context.Context, cursor antigravityCurs
 		if !inputAt.Equal(turn.InputAt) {
 			turn = antigravityTurn{InputAt: inputAt.UTC()}
 		}
-		status, busy := rows.ColumnText(3), rows.ColumnBool(4)
+		status, busy := row.Status, row.NotFullyIdle
 		if turn.Settled && status == "CASCADE_RUN_STATUS_IDLE" && !busy {
 			continue // skip already settled history without decoding its summaries
 		}
-		row := antigravity.Row{
-			ConversationID: id, UserInputAt: inputAt, ModifiedAt: rows.ColumnTime(2, sqlite3.TimeFormatAuto),
-			Status: status, NotFullyIdle: busy, Title: rows.ColumnText(5), WorkspaceURIs: rows.ColumnText(6),
-		}
-		if err := rows.Err(); err != nil {
+		row.UserInputAt = inputAt
+		row.ModifiedAt, err = summaryTime(modified)
+		if err != nil {
 			return fmt.Errorf("invalid last_modified_time: %w", err)
 		}
 		var summary antigravity.Summary
-		if err := (proto.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(rows.ColumnRawBlob(7), &summary); err != nil {
+		if err := (proto.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, &summary); err != nil {
 			return fmt.Errorf("invalid Antigravity raw_summary: %w", err)
 		}
 		observed := inputAt.Equal(cursor.Sessions[id].InputAt)
@@ -227,4 +219,16 @@ func (a *antigravityAdapter) collect(ctx context.Context, cursor antigravityCurs
 		return store.WriteJSON(a.checkpoint, cursor)
 	}
 	return nil
+}
+
+// Preserve the timestamp formats and precision used in existing checkpoints
+// and event IDs, regardless of the column's declared type in the client DB.
+func summaryTime(v any) (time.Time, error) {
+	if v == nil {
+		return time.Time{}, nil
+	}
+	if b, ok := v.([]byte); ok {
+		v = string(b)
+	}
+	return sqlite3.TimeFormatAuto.Decode(v)
 }

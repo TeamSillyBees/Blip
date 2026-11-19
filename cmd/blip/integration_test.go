@@ -84,7 +84,7 @@ func TestCLIEndToEnd(t *testing.T) {
 	if err := os.WriteFile(rollout, []byte(metadata("root", "user")+complete("historical")), 0600); err != nil {
 		t.Fatal(err)
 	}
-	call("install", "codex")
+	call("install", "codex", "--register-only")
 	t.Cleanup(func() { command := exec.Command(binary, "--config", path, "stop"); _, _ = command.CombinedOutput() })
 	call("start")
 	waitFor(t, func() bool { _, err := os.Stat(filepath.Join(dir, "state", "rollout-cursors.json")); return err == nil })

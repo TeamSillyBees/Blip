@@ -55,7 +55,7 @@ blip
 
 在终端向导中添加通知目的地，填写地址和必要凭据，然后选择 **保存并启动**。Blip 会保存配置，为需要 Hook 的来源安装接入，启动或重启通知进程，并逐个测试渠道投递。
 
-首次配置默认接入 Codex；其他编程助手和多个 Codex home 的接入方式见下方[编程助手](#支持的编程助手)。已有 Windows 服务时，请在管理员终端应用配置。
+当前源码构建支持用下表中的 `blip install` 命令选择第一个监听的助手。Windows 上请使用当前账户的管理员 PowerShell，安装命令会注册或更新系统服务并立即启动。首次接收提醒前，用 `blip configure` 配置一次通知渠道。直接从向导开始则默认接入 Codex。npm `0.3.0` 使用旧版安装流程。
 
 ### 3. 在编程助手中信任 Hook
 
@@ -75,22 +75,21 @@ blip status
 
 | 编程助手 | 接入方式 | 使用说明 |
 | --- | --- | --- |
-| **Codex CLI / 桌面版** | Hook + 本地会话日志；支持多个独立 home | 默认接入，[多来源配置](docs/sources.md) |
-| **Antigravity / agy CLI** | 只读监听会话摘要，提醒本轮结束、等待回复或等待授权 | [接入 Antigravity](docs/antigravity.md) |
-| **Claude Code** | 原生 Hooks，处理停止、提问与审批申请 | [接入 Claude Code](docs/claude-code.md) |
-| **Hermes** | Profile 的 shell hooks | [接入 Hermes](docs/hermes.md) |
-| **DSH · DeepSeek Harness** | 本地 Cordis 插件，观察原生会话与提问事件 | [接入 DSH](docs/dsh.md) |
+| **Codex CLI / 桌面版** | `blip install codex` | [多来源配置](docs/sources.md) |
+| **Antigravity / agy CLI** | 桌面版运行 `blip install antigravity`，CLI 运行 `blip install agy` | [接入 Antigravity](docs/antigravity.md) |
+| **Claude Code** | `blip install claude-code` | [接入 Claude Code](docs/claude-code.md) |
+| **Hermes** | `blip install hermes` | [接入 Hermes](docs/hermes.md) |
+| **DSH · DeepSeek Harness** | `blip install dsh` | [接入 DSH](docs/dsh.md) |
 
 各编程助手的支持版本与接入记录见[兼容性文档](docs/compatibility.md)。
 
-例如，添加另一个 Codex 环境后，重新打开向导应用：
+自定义目录也能用一条命令接入。例如，给工作用的 Codex 环境命名为 `codex-work`。
 
 ```powershell
-blip sources add --source codex-work --harness codex --home 'D:\Agent Homes\codex-work'
-blip
+blip install codex --source codex-work --home 'D:\Agent Homes\codex-work'
 ```
 
-选择 **保存并启动**，安装已启用来源、重启并测试。新来源使用事件 v2；自定义 Webhook 接收端需支持对应协议。来源隔离、迁移与服务权限见[来源管理](docs/sources.md)。
+新增来源使用事件 v2，自定义 Webhook 接收端需支持对应协议。来源隔离、迁移与服务权限见[来源管理](docs/sources.md)。
 
 ## 通知渠道
 
@@ -108,16 +107,17 @@ blip
 | 命令 | 用途 |
 | --- | --- |
 | `blip` | 打开配置向导，也可使用 `blip configure` |
+| `blip install <客户端>` | 接入该助手并启动监听，Windows 自动安装或更新服务 |
 | `blip status` | 查看运行状态、来源和投递结果 |
 | `blip test --wait` | 发送测试通知并等待投递结果 |
 | `blip doctor` | 检查来源安装、能力和最近回调 |
-| `blip restart` | 重启并加载配置，自动识别已注册的 Windows 服务 |
-| `blip start` / `blip stop` | 启动 / 停止普通后台进程 |
+| `blip restart` | 重启当前配置的服务并加载新配置 |
+| `blip start` / `blip stop` | 启动 / 停止当前配置的服务 |
 | `blip sources list` | 列出已配置的编程助手来源 |
 
 运行 `blip --help` 或 `blip <命令> --help` 查看完整选项。脚本可使用 `blip status --json`；无障碍终端提示使用 `blip configure --accessible`。
 
-需要开机自启时，按 [Windows 服务指南](docs/windows-service.md)安装服务。服务运行独立程序副本，升级 npm 包后还需更新该副本；普通 `start` 不设置开机自启。
+三个启停命令都优先管理当前配置的 Windows 服务。该配置尚未注册服务时，以及在 Linux 或 macOS 上，它们管理普通后台进程。可用 `blip service status` 核对 Windows 服务状态。[Windows 服务指南](docs/windows-service.md)
 
 ## 文档
 

@@ -22,7 +22,9 @@ npm install -g @teamsillybees/blip@latest
 blip
 ```
 
-选择通知渠道，填写地址和必要凭据，然后选择 **保存并启动**。Blip 会保存配置，为需要 Hook 的来源安装接入，启动通知进程并逐个测试渠道。已有进程会重启以加载新配置；已注册 Windows 服务时使用该服务，需要在管理员终端操作。也可选择 **仅保存并退出**，稍后按提示应用。
+选择通知渠道，填写地址和必要凭据，然后选择 **保存并启动**。Blip 会为启用的来源安装接入，启动监听并逐个测试渠道。也可选择 **仅保存并退出**，稍后应用。
+
+当前源码构建在 Windows 上会自动注册或更新系统服务，请在当前账户的管理员终端应用配置。新增监听使用 `blip install <客户端>`。npm `0.3.0` 的服务需要单独注册。[Windows 服务指南](windows-service.md)
 
 版本、升级和卸载步骤见 [npm 安装与分发](npm-distribution.md)。需要固定版本时，可用 `npm install -g @teamsillybees/blip@版本号`。
 
@@ -43,9 +45,9 @@ URL 明文显示并可直接编辑；Token、签名密钥和请求头值使用�
 
 配置默认保存在 `%APPDATA%\Blip\config.json`。在真实终端运行向导；需要屏幕阅读器友好的文本提示时使用 `blip configure --accessible`。脚本环境可使用 `blip init` 生成示例后编辑 JSON；[配置示例](../internal/config/example.json)中的所有目的地默认关闭。
 
-## 手动接入与通知测试
+## 接入助手与通知测试
 
-需要分别管理接入和后台时，可使用：
+接入助手后，可以测试现有通知渠道。
 
 ```powershell
 .\bin\blip.exe install codex
@@ -66,17 +68,16 @@ Codex hook 通过 home 下的固定入口挂载：Windows 为 `<codex_home>/.bli
 
 ## 后台进程与开机自启
 
-`start` 保持启动普通后台进程的原有行为，在 Windows 隐藏窗口运行，不设置开机自启；`stop` 保持通过文件请求平稳停止的行为。新增的 `restart`、向导“保存并启动”和 `test --wait` 会自动识别已注册的 Windows 服务，服务权限不足会直接报告错误。日常管理服务仍可使用 `service start/stop`。首次运行只为已有会话建立读取基线，不发送历史完成消息。之后的读取位置与待发通知保存在配置目录下的 `data` 中，停止期间的新记录会在重启后继续读取。
+`blip start`、`blip stop` 和 `blip restart` 都优先操作当前配置对应的 Windows 系统服务。查询或控制服务遇到权限错误时，命令会报告失败。仅当该配置尚未注册服务，或在 Linux、macOS 上运行时，三条命令才管理普通后台进程。
 
-需要开机自动运行时，可注册 Windows 服务。先配置通知渠道并停止普通后台进程，再在同一账户的管理员 PowerShell 中执行：
+Windows 安装命令会接管已有的普通后台进程。以 Codex 为例，在当前账户的管理员 PowerShell 中运行以下命令即可启用监听并查看服务状态。
 
 ```powershell
-.\bin\blip.exe service install
-.\bin\blip.exe service start
+.\bin\blip.exe install codex
 .\bin\blip.exe service status
 ```
 
-服务注册为自动（延迟启动），重启后无需登录即可运行。使用 `service stop` 停止、`service uninstall` 停止并卸载；配置和通知数据保留。服务使用独立低权限身份、安装时记录的配置与 Codex 目录，以及单独保存的程序副本。升级、目录权限和自定义配置用法见 [Windows 服务](windows-service.md)。
+服务注册为自动（延迟启动），重启后无需登录即可运行。日常暂停监听用 `blip stop`。需要取消开机自启并移除服务时，执行 `blip service uninstall`。服务以独立低权限身份运行，使用安装时记录的目录和程序副本。[Windows 服务指南](windows-service.md)
 
 ## 命令参考
 
@@ -86,10 +87,10 @@ blip [--config PATH] [COMMAND]
 （无命令）           在终端打开配置向导
 configure           配置渠道，可一次完成接入、启动和测试（别名 config / setup）
 init                生成配置示例，适合脚本或手动编辑
-install codex       安装输入与审批 hook
+install <客户端>    自动登记来源、安装接入并启动监听，Windows 自动安装或更新系统服务
 uninstall codex     仅移除本配置安装的 Blip hook
-start / stop        启动后台进程 / 请求平稳停止
-restart             重启并加载新配置；自动识别 Windows 服务
+start / stop        启动或停止监听，优先操作已注册的 Windows 服务
+restart             重启并加载新配置，优先操作已注册的 Windows 服务
 service             管理 Windows 服务（install / uninstall / start / stop / restart / status）
 run                 在当前终端运行
 status              显示运行摘要和投递结果；--json 输出完整机器可读数据
@@ -116,11 +117,10 @@ version             显示版本
 支持多个独立 Codex home、[Claude Code](claude-code.md)、[Hermes](hermes.md) 和 [DSH](dsh.md)，使用内置 harness 适配层。旧配置无需修改；需要新增来源时使用：
 
 ```powershell
-blip sources add --source codex-work --harness codex --home 'D:\Agent Homes\codex-work'
-blip
+blip install codex --source codex-work --home 'D:\Agent Homes\codex-work'
 ```
 
-在向导选择“保存并启动”，会安装所有已启用来源并重启、测试。单独运行 `install` / `uninstall` 时，非 Codex harness 只有一个来源可省略 `--source`，存在多个来源时显式选择。`install codex` 和 `uninstall codex` 始终默认操作 `codex-default`；操作其他 Codex home 必须指定 `--source`，避免旧命令误操作其他来源。
+在向导选择“保存并启动”，会安装所有已启用来源并重启、测试。单独接入 Claude Code、Hermes 或 DSH 时，只有一个来源可省略 `--source`，存在多个来源时显式选择。`install codex` 和 `uninstall codex` 默认操作 `codex-default`，操作其他 Codex home 必须指定 `--source`。Antigravity 桌面版和 agy CLI 的安装命令会按客户端默认目录选择来源。[Antigravity 接入说明](antigravity.md)
 
 这会将配置迁移为 v2 并备份原文件。原来的 `codex-default` 保持事件 v1、旧 ID、游标和安装记录；新来源使用事件 v2，webhook 接收端须支持 `schema_version: 2`。每个来源 ID 对应一个固定的 home；切换环境时请创建新来源。详见[来源管理与迁移](sources.md)和 [webhook v2](webhook-v2.md)。
 
@@ -178,7 +178,7 @@ Hook 只快速入队，不在 Codex 回调中请求外部网络。每个目的�
 | 测试通知未送达 | 运行 `blip test --wait` 和 `blip status`，检查目的地是否启用、地址与凭据是否正确，以及最近投递错误。 |
 | 测试可送达，但编程助手没有触发提醒 | 运行 `blip doctor`，确认来源 home、Hook 安装和客户端内的信任状态；Codex 既有会话可能需要重新打开。 |
 | 修改配置后未生效 | 执行 `blip restart`，或在向导选择“保存并启动”；已注册服务时，在管理员终端操作。 |
-| 升级后 Hook 仍指向旧程序 | 重新运行向导并“保存并启动”，刷新已启用来源的接入；Windows 服务还需按[服务升级步骤](windows-service.md#账户目录和升级)更新独立副本。 |
+| 升级后 Hook 仍指向旧程序 | 用新版程序执行 `blip install <客户端>`，或在向导中选择“保存并启动”刷新所有已启用来源。Windows 上会同时更新服务副本。[服务升级说明](windows-service.md#账户目录和升级) |
 | 来源显示 `degraded` | 查看 `status` 中逐来源的 `state` 和 `error_code`，按[来源诊断说明](sources.md#诊断和回退)恢复；保留原读取位置与绑定记录。 |
 | 对话名显示“未命名对话” | Codex 的名称索引可能缺失或不可读；部分其他来源尚未提供对话名。Windows 服务的名称索引权限见[服务指南](windows-service.md)。 |
 

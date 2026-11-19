@@ -91,6 +91,11 @@ func read(path string, validateChannels bool, defaults RuntimeDefaults) (Config,
 	if err := validateStructure(c); err != nil {
 		return c, err
 	}
+	return c.resolve(validateChannels, defaults)
+}
+
+func (c Config) resolve(validateChannels bool, defaults RuntimeDefaults) (Config, error) {
+	absolute := c.Path
 	if c.DeviceName == "" {
 		c.DeviceName = DefaultDeviceName()
 	}

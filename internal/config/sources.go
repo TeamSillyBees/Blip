@@ -169,11 +169,11 @@ func validateSources(c Config) error {
 
 // MigrateSources stages a v1 -> v2 change. Save retains the document's backup
 // and stale-write checks; ordinary reads never migrate on disk.
-func (d *Document) MigrateSources() error {
+func (d *Document) MigrateSources(defaults RuntimeDefaults) error {
 	if d.Config.SchemaVersion == 2 {
 		return nil
 	}
-	resolved, err := ReadLocal(d.path)
+	resolved, err := d.Config.Clone().resolve(false, defaults)
 	if err != nil {
 		return err
 	}

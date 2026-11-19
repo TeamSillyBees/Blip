@@ -44,7 +44,7 @@ blip
 
 配置和队列位于用户配置目录，与 npm 包分开。升级前先执行 `blip stop`，避免 Windows 正在运行的可执行文件被占用；升级后打开 `blip`，选择“保存并启动”以刷新接入、启动并测试。也可单独运行 `blip install codex`（其他来源加 `--source ID`）刷新 Codex hook 的程序路径；仅更新 npm 包不会自动刷新该路径。固定入口及注册定义不随 Node/npm 路径变化；从旧版直接命令迁移时需要审阅一次新入口，之后按 agent 对实际定义变更的提示确认信任。卸载前执行 `blip stop`、`blip uninstall codex`，再卸载 npm 包；配置和历史收据仍保留在用户目录。
 
-如果已经注册 Windows 服务，应在管理员终端先执行 `blip service uninstall`，升级 npm 包后再执行 `blip service install`、`blip service start`。服务运行的是独立程序副本，更新 npm 包不会自动更新该副本；卸载 npm 包也不会自动删除服务。完整步骤见 [Windows 服务](windows-service.md)。
+服务使用独立的程序副本。升级到包含一键接入的版本后，在当前账户的管理员终端执行 `blip install <客户端>`，即可更新副本、刷新该来源的权限并启动服务。仍使用 npm `0.3.0` 时，按旧版的 `service uninstall`、`service install`、`service start` 步骤更新副本。卸载 Blip 时使用 `blip service uninstall` 移除服务。[Windows 服务](windows-service.md)
 
 需要长期使用 hook 时应使用持久安装。临时 `npx` 缓存目录可能被清理；固定入口仍需可用的目标程序，更新位置后应重新运行安装接入命令。若 npm 被配置为省略可选依赖，启动器会提示使用 `--include=optional` 重新安装。
 

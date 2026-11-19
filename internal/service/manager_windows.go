@@ -190,6 +190,9 @@ func Install(ctx context.Context, opts InstallOptions) (result error) {
 	if _, err = grantPermission(permissionTarget{directory, readExecute, inheritChildren, true}, sid); err != nil {
 		return fmt.Errorf("grant service executable access: %w", err)
 	}
+	if err := prepareSourceDatabases(ctx, metadata.Sources); err != nil {
+		return err
+	}
 	for _, target := range permissionTargets(metadata) {
 		if err = ctx.Err(); err != nil {
 			return err
@@ -369,6 +372,7 @@ func Query(configPath string) (Status, error) {
 		return result, err
 	}
 	result.Installed, result.State, result.Executable, result.Account = true, stateName(status.State), metadata.Executable, settings.ServiceStartName
+	result.Defaults.StateDir, result.Defaults.CodexHome = metadata.StateDir, metadata.CodexHome
 	switch settings.StartType {
 	case mgr.StartAutomatic:
 		result.StartType = "automatic"
@@ -452,6 +456,9 @@ func cleanupInstallation(ctx context.Context, metadata installMetadata) error {
 			return ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}
+	}
+	if err = os.Remove(metadata.Executable + ".update"); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	if err = os.Remove(filepath.Join(directory, metadataFilename)); err != nil && !os.IsNotExist(err) {
 		return err

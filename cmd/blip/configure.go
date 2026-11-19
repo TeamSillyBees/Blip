@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
+	"github.com/TeamSillyBees/Blip/internal/service"
 	"github.com/TeamSillyBees/Blip/internal/setup"
 )
 
@@ -60,30 +62,35 @@ func configure(ctx context.Context, path string, input io.Reader, output io.Writ
 }
 
 func applyConfiguration(ctx context.Context, path string, output io.Writer) error {
-	c, err := config.Read(path)
-	if err != nil {
-		return err
-	}
-	if len(c.Enabled()) == 0 {
-		return errors.New("请先启用至少一个通知目的地")
-	}
-	for _, source := range c.EffectiveSources() {
-		if !source.Enabled {
-			continue
-		}
-		adapter, err := agents.Builtins().Open(c, source)
+	var c config.Config
+	err := withInstallLock(ctx, path, func(status service.Status) error {
+		var err error
+		c, err = config.ReadWithDefaults(path, status.Defaults)
 		if err != nil {
-			return fmt.Errorf("接入 %s：%w", source.ID, err)
+			return err
 		}
-		if _, ok := adapter.(agents.Installer); !ok {
-			continue
+		if len(c.Enabled()) == 0 {
+			return errors.New("请先启用至少一个通知目的地")
 		}
-		// Installation is idempotent and also refreshes a moved/upgraded binary.
-		if err := execute(ctx, path, []string{"install", source.Harness, source.ID}, strings.NewReader(""), output); err != nil {
-			return fmt.Errorf("接入 %s：%w", source.ID, err)
+		exe, err := os.Executable()
+		if err != nil {
+			return err
 		}
-	}
-	if err := manageLifecycle(ctx, c, "restart", output); err != nil {
+		var sources []config.Source
+		for _, source := range c.EffectiveSources() {
+			if source.Enabled {
+				if err := bindInstallSource(ctx, c, source); err != nil {
+					return err
+				}
+				if err := installClientHook(ctx, c, source, exe, output); err != nil {
+					return err
+				}
+				sources = append(sources, source)
+			}
+		}
+		return activateInstallation(ctx, c, sources, status, exe, output)
+	})
+	if err != nil {
 		return err
 	}
 	return sendTest(ctx, c, output)
@@ -130,7 +137,7 @@ func inferSource(c config.Config, harness string) (string, error) {
 		return matches[0], nil
 	}
 	if len(matches) == 0 {
-		return "", fmt.Errorf("尚未配置 %s 来源；查看 %s", harness, cliCommand(c.Path, "sources", "add", "--help"))
+		return "", fmt.Errorf("尚未配置 %s 来源，可运行 %s 开启监听", harness, cliCommand(c.Path, "install", harness))
 	}
 	return "", fmt.Errorf("有多个 %s 来源，请用 --source 选择：%s", harness, strings.Join(matches, ", "))
 }

@@ -66,7 +66,7 @@ func TestHumanStatusChecksHooksAsCurrentUserInsteadOfServiceSnapshot(t *testing.
 	if err := store.WriteJSON(c.Path, c); err != nil {
 		t.Fatal(err)
 	}
-	if err := execute(context.Background(), c.Path, []string{"install", "codex"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
+	if err := run([]string{"--config", c.Path, "install", "codex", "--register-only"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	lock, available, err := (store.Queue{Dir: c.StateDir}).WorkerLock()

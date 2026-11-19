@@ -150,13 +150,22 @@ func (i dshInstaller) removeOwned(doc *yaml.Node, m dshManifest) (int, error) {
 	return count, nil
 }
 
+// CheckDSHProfile verifies the client actually owns this directory before an
+// installer reserves a permanent source ID or writes a Cordis patch.
+func CheckDSHProfile(home string) error {
+	if info, err := os.Stat(filepath.Join(home, "cordis.yml")); err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("DSH 需要包含 cordis.yml 的现有 profile（%s），可用 --home 指定目录", home)
+	}
+	return nil
+}
+
 func (i dshInstaller) edit(ctx context.Context, executable string, install bool) error {
 	if !config.ValidSourceID(i.source.ID) {
 		return fmt.Errorf("invalid source ID")
 	}
 	if install {
-		if info, err := os.Stat(filepath.Join(i.source.Home, "cordis.yml")); err != nil || !info.Mode().IsRegular() {
-			return fmt.Errorf("DSH home must be an existing profile containing cordis.yml")
+		if err := CheckDSHProfile(i.source.Home); err != nil {
+			return err
 		}
 	}
 	if err := os.MkdirAll(i.source.Home, 0700); err != nil {

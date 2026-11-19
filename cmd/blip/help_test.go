@@ -22,6 +22,7 @@ func TestChineseHelpAcrossCommandTree(t *testing.T) {
 			commands = append(commands, action+" "+harness)
 		}
 	}
+	commands = append(commands, "install agy", "install antigravity")
 	for _, action := range []string{"install", "uninstall", "start", "stop", "restart", "status", "run"} {
 		commands = append(commands, "service "+action)
 	}
@@ -52,6 +53,12 @@ func TestChineseHelpAcrossCommandTree(t *testing.T) {
 				for _, want := range []string{"常用操作：", "接入与维护：", "安装编程助手接入", "管理 Windows 服务和开机自启", "显示版本号"} {
 					if !strings.Contains(output.String(), want) {
 						t.Errorf("root help is missing %q", want)
+					}
+				}
+				common, _, _ := strings.Cut(output.String(), "接入与维护：")
+				for _, name := range []string{"install", "start", "stop", "restart"} {
+					if !strings.Contains(common, "\n  "+name+" ") {
+						t.Errorf("%s is missing from common operations: %s", name, common)
 					}
 				}
 			}

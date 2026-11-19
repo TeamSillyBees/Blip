@@ -201,6 +201,21 @@ func (q Queue) Load() ([]Job, error) {
 	return ready, nil
 }
 
+// ReadJob reads one job and its current receipts under the queue's shared lock.
+func (q Queue) ReadJob(id string) (Job, error) {
+	if !validID(id) {
+		return Job{}, fmt.Errorf("invalid notification ID")
+	}
+	name := id + ".json"
+	data, err := q.readJobFile(name)
+	if err != nil {
+		return Job{}, err
+	}
+	var job Job
+	err = decodeJob(data, name, &job)
+	return job, err
+}
+
 func (q Queue) readJobFile(name string) ([]byte, error) {
 	// Windows does not allow replacing/removing a record while ReadFile holds
 	// its handle. Shared queue locks let readers coexist and exclude mutation

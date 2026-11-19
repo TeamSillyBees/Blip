@@ -106,30 +106,7 @@ func permissionTargets(m installMetadata) []permissionTarget {
 		}
 	}
 	if m.Format == 2 {
-		for _, source := range m.Sources {
-			if source.Enabled {
-				// Identity binding needs metadata, never a directory listing or
-				// inherited access to credentials/configuration in the home.
-				targets = append(targets, permissionTarget{source.Home, identifyDirectory, 0, true})
-			}
-		}
-		for _, entry := range m.ReadPaths {
-			if entry.Optional {
-				if noReparsePoints(entry.Path) != nil {
-					continue
-				}
-				info, err := os.Lstat(entry.Path)
-				if err != nil || (!entry.Directory && !info.Mode().IsRegular()) || (entry.Directory && !info.IsDir()) {
-					continue
-				}
-			}
-			permissions, inheritance := windows.ACCESS_MASK(windows.FILE_GENERIC_READ), uint32(0)
-			if entry.Directory {
-				permissions = readExecute
-				inheritance = inheritChildren
-			}
-			targets = append(targets, permissionTarget{entry.Path, permissions, inheritance, entry.Directory})
-		}
+		targets = append(targets, sourcePermissionTargets(m)...)
 	}
 	merged := make(map[string]permissionTarget)
 	for _, target := range targets {
@@ -156,6 +133,39 @@ func permissionTargets(m installMetadata) []permissionTarget {
 		return len(result[i].path) < len(result[j].path)
 	})
 	return result
+}
+
+func sourcePermissionTargets(m installMetadata) []permissionTarget {
+	var targets []permissionTarget
+	for _, source := range m.Sources {
+		if source.Enabled {
+			if source.Harness == "antigravity" {
+				if _, err := os.Lstat(source.Home); os.IsNotExist(err) {
+					continue // this read-only listener does not create a client's home
+				}
+			}
+			// Grant identity lookup without listing or inheriting access to the home.
+			targets = append(targets, permissionTarget{source.Home, identifyDirectory, 0, true})
+		}
+	}
+	for _, entry := range m.ReadPaths {
+		if entry.Optional {
+			if noReparsePoints(entry.Path) != nil {
+				continue
+			}
+			info, err := os.Lstat(entry.Path)
+			if err != nil || (!entry.Directory && !info.Mode().IsRegular()) || (entry.Directory && !info.IsDir()) {
+				continue
+			}
+		}
+		permissions, inheritance := windows.ACCESS_MASK(windows.FILE_GENERIC_READ), uint32(0)
+		if entry.Directory {
+			permissions = readExecute
+			inheritance = inheritChildren
+		}
+		targets = append(targets, permissionTarget{entry.Path, permissions, inheritance, entry.Directory})
+	}
+	return targets
 }
 
 func protectInstallDirectory(path string) error {
@@ -203,6 +213,10 @@ func currentDACL(path string) (*windows.ACL, string, error) {
 }
 
 func grantPermission(target permissionTarget, sid *windows.SID) (aclChange, error) {
+	return applyPermission(target, sid, false, nil)
+}
+
+func applyPermission(target permissionTarget, sid *windows.SID, recorded bool, beforeGrant func(aclChange) error) (aclChange, error) {
 	change := aclChange{Path: target.path}
 	if err := noReparsePoints(target.path); err != nil {
 		return change, err
@@ -227,6 +241,9 @@ func grantPermission(target permissionTarget, sid *windows.SID) (aclChange, erro
 			return change, err
 		}
 		if ace.Header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE && ace.Header.AceFlags&windows.INHERITED_ACE == 0 && (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String() == sid.String() {
+			if recorded && ace.Mask&target.permissions == target.permissions && uint32(ace.Header.AceFlags) == target.inheritance {
+				return change, nil
+			}
 			return change, fmt.Errorf("service identity already has explicit access at %s; clean the prior service installation first", target.path)
 		}
 	}
@@ -242,6 +259,11 @@ func grantPermission(target permissionTarget, sid *windows.SID) (aclChange, erro
 	}}, acl)
 	if err != nil {
 		return change, err
+	}
+	if !recorded && beforeGrant != nil {
+		if err := beforeGrant(aclChange{Path: target.path, SID: sid.String()}); err != nil {
+			return change, err
+		}
 	}
 	if err = windows.SetNamedSecurityInfo(target.path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION, nil, nil, updated, nil); err != nil {
 		return change, err

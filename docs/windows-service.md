@@ -1,53 +1,44 @@
 # Windows 服务
 
-从 `0.2.0-dev.2` 起，Blip 可注册为真正的 Windows 服务，由服务控制管理器（SCM）运行。普通 `blip start` 仍启动当前用户的后台进程；只有显式执行 `blip service install` 才会注册开机自启。
+在 Windows 上，`blip install <客户端>` 会为该配置注册系统服务，设置开机自动延迟启动，并等待服务运行。服务由 Windows 服务控制管理器（SCM）管理。
 
-Windows 服务已包含在 npm 正式版 `0.2.0` 中，可使用 `npm install -g @teamsillybees/blip@latest` 安装，也可以从源码构建或使用本地安装包。通过 npm 安装时，下文的 `.\bin\blip.exe` 可替换为 `blip`。
+下文的一键接入适用于当前源码构建。npm `0.3.0` 需要通过 `blip service install` 注册服务，再运行 `blip service start` 启动。
 
 ## 安装与启动
 
-先在正常用户终端配置通知渠道、安装 Codex hook，并停止已有后台进程：
+以当前使用编程助手的账户打开管理员 PowerShell。以 Codex 为例，接入和检查服务只需运行以下命令。
 
 ```powershell
-.\bin\blip.exe
-.\bin\blip.exe stop
+blip install codex
+blip service status
 ```
 
-在向导中选择“保存并启动”，完成配置、接入和渠道测试后，再停止普通后台进程以安装服务。
+安装会自动找到客户端目录并接管已有的普通 Blip 后台进程。首次接收提醒前，运行 `blip configure` 设置通知渠道并选择“保存并启动”。对于 Codex 等使用 hook 的客户端，按其提示审阅并信任新 hook。
 
-在 Codex 中审阅并信任 hook。然后以同一个 Windows 账户打开管理员 PowerShell，进入 Blip 目录，执行：
-
-```powershell
-.\bin\blip.exe service install
-.\bin\blip.exe service start
-.\bin\blip.exe service status
-```
-
-`install` 注册服务并设置自动（延迟启动），不会立即启动；`start` 启动现有服务并等待就绪。服务注册后，Windows 重启时会自动启动它，无需保持终端打开或登录桌面。
+已有服务时，再执行安装命令会刷新来源权限、更新程序副本并重启服务。低层命令 `blip service install` 仅用于单独注册服务，之后可用 `blip start` 启动。
 
 自定义配置时，所有命令使用同一个 `--config`。如果管理员终端属于另一个账户，应先在配置中将 `codex_home` 写为原用户 Codex 目录的绝对路径，再明确指定原用户的配置路径；仅指定配置文件不会改变安装账户的默认 Codex 目录：
 
 ```powershell
-.\bin\blip.exe --config 'C:\Users\你的账户\AppData\Roaming\Blip\config.json' service install
-.\bin\blip.exe --config 'C:\Users\你的账户\AppData\Roaming\Blip\config.json' service start
+blip --config 'C:\Users\你的账户\AppData\Roaming\Blip\config.json' install codex
 ```
 
-服务名由配置文件的绝对路径生成，例如 `Blip-0123456789abcdef`。不同配置使用不同服务名；重复安装已有服务会被拒绝，不会覆盖其他安装。
+服务名由配置文件的绝对路径生成，例如 `Blip-0123456789abcdef`。不同配置使用不同的服务名。
 
 ## 日常管理
 
 ```powershell
 blip service status      # 查询服务是否注册、运行状态及启动类型
 blip status              # 查看采集和通知投递状态
-blip service stop        # 平稳停止服务；下次开机仍会自动启动
-blip service start       # 再次启动服务
+blip stop                # 平稳停止服务，下次开机仍会自动启动
+blip start               # 再次启动服务
 blip restart             # 重启服务并加载配置
 blip service uninstall   # 停止并删除服务，取消开机自启
 ```
 
 安装、启动、停止和卸载需要管理员权限，服务状态查询只申请读取权限。`service uninstall` 保留原配置、Codex hook 和通知队列；如果还要解除 Codex 接入，再执行 `blip uninstall codex`。
 
-同一配置同时只允许运行一个工作进程。新增的 `restart`、向导“保存并启动”和 `test --wait` 会自动识别已注册的服务；查询或控制服务失败时会报告错误，不会另外启动普通后台进程。原有 `start` 和 `stop` 保持普通后台进程启动、文件停止请求的语义，不新增 SCM 权限依赖；管理已注册服务请使用 `service start/stop` 或统一的 `restart`。
+同一配置同时运行一个工作进程。`start`、`stop`、`restart` 和 `test --wait` 优先使用已注册的服务，查询或控制服务失败时会报告错误。只有该配置尚未注册服务时，顶层启停命令才管理普通后台进程。`service start/stop/restart` 可用于明确指定 SCM。
 
 启动和停止命令最多等待 30 秒。首次扫描较慢时，命令超时不代表服务进程已被终止，可用 `service status` 检查进度；启动阶段尚未结束时，停止和卸载命令会先等待服务可以接收停止请求。
 
@@ -61,17 +52,13 @@ blip service uninstall   # 停止并删除服务，取消开机自启
 
 配置 v2 按 `sources` 注册多个来源，home 必须显式提供，不从 LocalService 的个人目录推断。安装元数据 v2 保存各来源的绝对位置与 adapter 声明的读取文件、子目录；停用来源不新增读取授权，空来源列表只保留公共队列和配置权限。卸载依据安装时的清单撤销本服务身份授权，即使来源后来从配置移除也可清理；旧格式安装记录继续兼容。
 
-服务使用 `%ProgramFiles%\Blip\<服务名>\blip.exe` 中的独立副本。更新普通 CLI 或 npm 包不会自动更新正在运行的服务程序。升级服务时：
-
-1. 使用原配置路径执行 `blip service uninstall`。
-2. 更新 CLI 或重新构建程序。
-3. 执行 `blip service install`、`blip service start`。
+服务使用 `%ProgramFiles%\Blip\<服务名>\blip.exe` 中的独立副本。更新 CLI 后，用原配置执行 `blip install <客户端>` 即可升级副本。需一次刷新所有已启用来源时，在管理员终端打开向导，选择“保存并启动”。
 
 修改渠道或设备名称后，执行 `blip restart`，或在管理员终端的向导中选择“保存并启动”即可加载。更换配置文件、`codex_home` 或 `state_dir` 的位置时，先卸载原服务，再修改设置并重新安装，以更新路径和访问权限。
 
-新增来源、变更来源读取路径或启用此前未授权的来源，也须重新安装服务。启用事件 v2 前应一起升级用户 hook 程序与服务程序副本，避免旧服务把新事件当作不支持的格式。
+新接入使用 `blip install <客户端>`。自定义目录可在同一条命令中指定 `--home`，多个同类来源可用 `--source` 命名。启用事件 v2 时，用新版 CLI 重新执行安装命令，以同步更新用户 hook 和服务副本。
 
-从旧版本升级到精简通知模板时，同样需要卸载后重新安装服务以更新程序副本及名称索引权限。名称索引不存在或因替换文件而不可读时，通知会显示“未命名对话”；索引创建后可重新安装服务来授予读取权限。
+Codex 名称索引不存在或因文件替换而不可读时，通知会显示“未命名对话”。索引创建后可运行 `blip install codex` 刷新读取权限。
 
 ## 恢复与诊断
 

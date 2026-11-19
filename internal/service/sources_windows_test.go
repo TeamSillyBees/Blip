@@ -3,14 +3,84 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"golang.org/x/sys/windows"
 )
+
+func TestActivateAntigravitySourcePreservesLegacyServiceLedger(t *testing.T) {
+	root := t.TempDir()
+	codeHome := filepath.Join(root, "codex")
+	installed := installMetadata{
+		Format: 1, Name: "Blip-test", ConfigPath: filepath.Join(root, "config.json"),
+		Executable: filepath.Join(root, "service", "blip.exe"), StateDir: filepath.Join(root, "state"), CodexHome: codeHome,
+		Grants: []aclChange{{Path: filepath.Join(codeHome, "sessions"), SID: "legacy"}, {Path: filepath.Join(codeHome, "session_index.jsonl"), SID: "legacy"}},
+	}
+	args := serviceArguments(installed)
+	s := config.Source{ID: "agy", Harness: "antigravity", Enabled: true, Home: filepath.Join(root, "agy"), EventVersion: 2}
+	plan := installMetadata{Format: 2, Sources: []config.Source{s}, ReadPaths: sourceReadPaths(config.Config{}, s)}
+	for i := 0; i < 2; i++ {
+		if err := recordServiceSources(&installed, plan); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(args, serviceArguments(installed)) || installed.Format != 2 || len(installed.Sources) != 2 ||
+			installed.Sources[0].ID != config.DefaultSourceID || installed.Sources[1] != s || len(installed.ReadPaths) != 5 || len(installed.Grants) != 2 {
+			t.Fatalf("upgrade lost grants, changed SCM identity or duplicated a source: %+v", installed)
+		}
+	}
+	plan.Sources[0].Home = filepath.Join(root, "other")
+	if err := recordServiceSources(&installed, plan); err == nil {
+		t.Fatal("service allowed an existing ID to change homes")
+	}
+}
+
+func TestActivateSourceJournalsAndRepairsReadGrant(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "conversation_summaries.db-wal")
+	sid, err := windows.StringToSid("S-1-5-80-304021-304022-304023-304024-304025")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := permissionTarget{path: path, permissions: windows.FILE_GENERIC_READ}
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("cannot persist service metadata")
+	if _, err := applyPermission(target, sid, false, func(aclChange) error { return failure }); !errors.Is(err, failure) || allowedSIDEntries(t, path, sid.String(), true) != 0 {
+		t.Fatalf("ACL changed without a durable record: %v", err)
+	}
+	var grants []aclChange
+	record := func(g aclChange) error {
+		grants = append(grants, g)
+		return nil
+	}
+	if _, err := applyPermission(target, sid, false, record); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if i == 1 {
+			// A client replacing its WAL also replaces the earlier explicit ACE.
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := applyPermission(target, sid, true, record); err != nil {
+			t.Fatal(err)
+		}
+		if len(grants) != 1 || allowedSIDEntries(t, path, sid.String(), true) != 1 {
+			t.Fatalf("missing or duplicate read access: %+v", grants)
+		}
+	}
+}
 
 func TestMultiSourceServiceRecordsOnlyRequiredReadPaths(t *testing.T) {
 	root := t.TempDir()

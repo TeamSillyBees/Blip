@@ -3,13 +3,10 @@
 源码中的 Claude Code adapter 使用事件 v2，复用已有飞书、企业微信、Gotify 和 webhook 渠道。安装协议以官方 CLI **2.1.318** 为验证基线；直接 executable + args 与 `onFailure: continue` 要求支持对应字段的版本，旧版本须另行验证。
 
 ```powershell
-blip sources add --source claude-main --harness claude-code --home "$env:USERPROFILE\.claude"
-blip install claude-code --source claude-main
-blip doctor --source claude-main
-blip restart
+blip install claude-code
 ```
 
-`--home` 必须对应实际 Claude Code 配置目录；使用自定义 `CLAUDE_CONFIG_DIR` 时填写该目录。安装器只合并这个目录的 `settings.json`，保留其他 hooks、权限及信任设置。明确关闭 hooks 时拒绝安装，不自行打开功能。新 hook 仍须按 Claude Code 的要求审阅和信任。
+首次接入会读取 `CLAUDE_CONFIG_DIR`，缺省使用 `~/.claude`。安装器合并该目录的 `settings.json`，保留其他 hooks、权限及信任设置。若显式关闭 hooks，请先在 Claude Code 中启用。新 hook 仍须按 Claude Code 的要求审阅和信任。
 
 | 信号 | 提醒与处理 |
 | --- | --- |

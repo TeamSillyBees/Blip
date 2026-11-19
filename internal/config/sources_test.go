@@ -23,7 +23,7 @@ func TestLegacySourceMigrationPreservesResolvedHomeAndVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = doc.MigrateSources(); err != nil {
+	if err = doc.MigrateSources(RuntimeDefaults{}); err != nil {
 		t.Fatal(err)
 	}
 	if err = doc.Save(context.Background()); err != nil {
