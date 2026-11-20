@@ -1,0 +1,7 @@
+{"hookEventName":"PreInvocation","conversationId":"session","invocationNum":0,"initialNumSteps":1,"lastUserInput":"Continue"}
+{"hookEventName":"PreToolUse","conversationId":"session","stepIdx":2,"toolCall":{"id":"call-question","name":"ask_question","args":{"questions":[{"question":"Test input?","options":["Yes","No"]}]}}}
+{"hookEventName":"PreToolUse","conversationId":"session","stepIdx":2,"toolCall":{"id":"call-command","name":"run_command","args":{"CommandLine":"echo probe","WaitMsBeforeAsync":500}}}
+{"hookEventName":"Stop","conversationId":"session","executionNum":0,"fullyIdle":false,"terminationReason":"NO_TOOL_CALL","lastUserInput":"Continue"}
+{"hookEventName":"Stop","conversationId":"session","executionNum":0,"fullyIdle":true,"terminationReason":"NO_TOOL_CALL","lastUserInput":"Continue"}
+{"hookEventName":"PreInvocation","conversationId":"session","invocationNum":0,"initialNumSteps":3,"lastUserInput":"Continue"}
+{"hookEventName":"Stop","conversationId":"session","executionNum":0,"fullyIdle":true,"terminationReason":"NO_TOOL_CALL","lastUserInput":"Continue"}

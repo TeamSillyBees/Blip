@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.2.0"
+var version = "0.3.1+local"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -91,11 +92,29 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		{"hook", "从标准输入接收编程助手的钩子事件"},
 	} {
 		var sourceID string
+		var encodedConfig string
+		var antigravityEvent string
 		var jsonOutput bool
 		var wait bool
 		command := &cobra.Command{
 			Use: entry.name, Short: entry.description, Args: noArgs, Hidden: entry.name == "hook",
 			RunE: func(command *cobra.Command, _ []string) error {
+				if antigravityEvent != "" {
+					// Even a disabled source, missing config or queue error must
+					// return a neutral response to the agent's decision pipeline.
+					reply := "{}"
+					if antigravityEvent == "PreToolUse" {
+						reply = `{"decision":"allow"}`
+					}
+					defer fmt.Fprintln(command.OutOrStdout(), reply)
+				}
+				if command.Name() == "hook" && encodedConfig != "" {
+					decoded, err := base64.RawURLEncoding.DecodeString(encodedConfig)
+					if err != nil || !filepath.IsAbs(string(decoded)) {
+						return nil
+					}
+					path = string(decoded)
+				}
 				if command.Name() == "test" && (wait || (!command.Flags().Changed("wait") && setup.CanPrompt(command.InOrStdin(), command.OutOrStdout()))) {
 					c, err := config.Read(path)
 					if err != nil {
@@ -114,6 +133,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 				if sourceID != "" {
 					args = append(args, sourceID)
 				}
+				if antigravityEvent != "" && sourceID != "" {
+					args = append(args, antigravityEvent)
+				}
 				return execute(command.Context(), path, args, command.InOrStdin(), command.OutOrStdout())
 			},
 		}
@@ -123,6 +145,12 @@ func run(args []string, input io.Reader, output io.Writer) error {
 				description = "来源 ID；默认使用 codex-default"
 			}
 			command.Flags().StringVar(&sourceID, "source", "", description)
+		}
+		if entry.name == "hook" {
+			command.Flags().StringVar(&antigravityEvent, "antigravity-event", "", "Antigravity 原生回调类型")
+			_ = command.Flags().MarkHidden("antigravity-event")
+			command.Flags().StringVar(&encodedConfig, "config-encoded", "", "客户端回调使用的配置路径")
+			_ = command.Flags().MarkHidden("config-encoded")
 		}
 		if entry.name == "status" {
 			command.Flags().BoolVar(&jsonOutput, "json", false, "输出 JSON，适合脚本处理；重定向输出时默认启用")
@@ -136,22 +164,22 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	uninstall := &cobra.Command{Use: "uninstall", Short: "卸载编程助手接入", Args: noArgs,
 		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 	}
-	for _, harness := range agents.Builtins().InstallableHarnesses() {
+	for _, target := range installTargets {
 		var sourceID string
 		child := &cobra.Command{
-			Use: harness, Short: "卸载 " + harness + " 的 Blip 通知钩子", Args: noArgs,
+			Use: target.command, Short: "卸载 " + target.label + " 的 Blip 通知钩子", Args: noArgs,
 			RunE: func(command *cobra.Command, _ []string) error {
 				if sourceID == "" {
 					c, err := config.ReadLocal(path)
 					if err != nil {
 						return err
 					}
-					sourceID, err = inferSource(c, harness)
+					sourceID, err = target.uninstallSource(c)
 					if err != nil {
 						return err
 					}
 				}
-				return execute(command.Context(), path, []string{command.Parent().Name(), harness, sourceID}, command.InOrStdin(), command.OutOrStdout())
+				return execute(command.Context(), path, []string{command.Parent().Name(), target.harness, sourceID}, command.InOrStdin(), command.OutOrStdout())
 			},
 		}
 		child.Flags().StringVar(&sourceID, "source", "", "已配置的来源 ID")
@@ -238,7 +266,11 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 		if len(command) > 1 {
 			id = command[1]
 		}
-		_ = agents.Capture(ctx, c, id, input)
+		if len(command) > 2 {
+			_ = agents.CaptureAntigravity(ctx, c, id, command[2], input)
+		} else {
+			_ = agents.Capture(ctx, c, id, input)
+		}
 		return nil // Notification failures cannot approve, deny, or block an agent operation.
 	case "uninstall":
 		if len(command) < 2 {

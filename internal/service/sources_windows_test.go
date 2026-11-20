@@ -30,7 +30,7 @@ func TestActivateAntigravitySourcePreservesLegacyServiceLedger(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !slices.Equal(args, serviceArguments(installed)) || installed.Format != 2 || len(installed.Sources) != 2 ||
-			installed.Sources[0].ID != config.DefaultSourceID || installed.Sources[1] != s || len(installed.ReadPaths) != 5 || len(installed.Grants) != 2 {
+			installed.Sources[0].ID != config.DefaultSourceID || installed.Sources[1] != s || len(installed.ReadPaths) != 2 || len(installed.Grants) != 2 {
 			t.Fatalf("upgrade lost grants, changed SCM identity or duplicated a source: %+v", installed)
 		}
 	}
@@ -42,7 +42,7 @@ func TestActivateAntigravitySourcePreservesLegacyServiceLedger(t *testing.T) {
 
 func TestActivateSourceJournalsAndRepairsReadGrant(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "conversation_summaries.db-wal")
+	path := filepath.Join(dir, "session_index.jsonl")
 	sid, err := windows.StringToSid("S-1-5-80-304021-304022-304023-304024-304025")
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestActivateSourceJournalsAndRepairsReadGrant(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		if i == 1 {
-			// A client replacing its WAL also replaces the earlier explicit ACE.
+			// A client replacing its index also replaces the earlier explicit ACE.
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}

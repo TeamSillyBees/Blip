@@ -1,9 +1,5 @@
-# Antigravity 会话摘要样本
+# Antigravity 原生 Hook 样本
 
-`summaries.json` 中的 Base64 是 agy CLI 1.5.9 在 Windows 上写入 `conversation_summaries.raw_summary` 的 protobuf 片段。采样使用独立数据目录、回环 Gemini API 模拟模型和回环 Webhook。保留实际字段编号、交互类型、问题与选项，移除了路径、时间和无关元数据，替换了工具调用和轨迹 ID。
+`native-hooks.jsonl` 保留 Windows 上 agy CLI 1.5.9 回调中用于判定事件的字段。采样使用独立的用户目录和回环 Gemini API 模拟模型。样本合并了提问、普通命令、后台任务结束和连续相同提示词的场景。会话、提示词和工具调用 ID 已替换，测试运行时填入临时客户端目录和工作区路径。
 
-- `completed` 来自 `agy -p` 返回成功后的完全空闲会话。
-- `permission` 在 `agy acp` 就 `run_command` 发出 `session/request_permission` 后、测试客户端作答前读取。
-- `question` 来自 `ask_question` 等待选择 Yes 或 No 时的摘要。
-
-运行 `go test ./internal/agents -run TestAntigravity -count=1` 会将样本写入临时 WAL 数据库，检查采集、轮次去重和重启恢复。字段投影见 [summary.proto](../../../antigravity/summary.proto)。客户端形态与数据目录可参阅 [Google Antigravity 文档](https://antigravity.google/docs/hooks)。
+运行 `go test ./internal/agents -run TestAntigravity -count=1` 可验证来源隔离、去重、等待输入和终止条件。[Google 官方协议](https://antigravity.google/docs/hooks)

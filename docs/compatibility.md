@@ -171,7 +171,12 @@ CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失
 ## Antigravity 与 agy CLI（2026-11-19，0.3.0）
 
 - Windows 上使用 agy CLI 1.5.9 和本地模拟模型，分别触发正常结束、带两个选项的提问和普通命令的权限请求。Blip 后台进程从实际数据库采集，经本地持久队列将三类事件投递至回环 HTTP Webhook。
-- 已核对 Antigravity App 2.32.2 的数据库和消息字段。桌面端的交互弹窗与外部通知渠道未做端到端实测。来源使用事件 v2，覆盖范围见[接入说明](antigravity.md)和[采样记录](../internal/agents/testdata/antigravity/README.md)。
+- 已核对 Antigravity App 2.32.2 的数据库和消息字段。桌面端的交互弹窗与外部通知渠道未做端到端实测。以上为 0.3.0 的 SQLite 采集验证记录。
+
+## Antigravity 原生 Hook（2026-11-20，0.3.1）
+
+- Windows 上使用 agy CLI 1.5.9、本地模拟模型和回环 HTTP Webhook 实测。两端同时注册后，`ask_question` 的问题和选项送达 CLI 来源一次，同一会话连续两轮相同输入各送达一次完成提醒。
+- 实测普通 `run_command` 触发了客户端审批，Blip 保持静默。显式 `ask_permission` 和异常 `Stop` 按官方协议验证。桌面版使用同一协议，已验证其注册、来源隔离和回调处理，尚未实测桌面界面触发事件。[接入说明](antigravity.md) · [Hook 样本](../internal/agents/testdata/antigravity/README.md)
 
 ## 一手资料
 

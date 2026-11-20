@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
-	"github.com/TeamSillyBees/Blip/internal/antigravity"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/service"
 	"github.com/gofrs/flock"
@@ -226,6 +225,28 @@ func bindInstallSource(ctx context.Context, c config.Config, s config.Source) er
 	return agents.Bind(ctx, c, s)
 }
 
+func (target installTarget) uninstallSource(c config.Config) (string, error) {
+	if target.harness != "antigravity" {
+		return inferSource(c, target.harness)
+	}
+	profile, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	home, err := config.CanonicalHome(filepath.Join(profile, target.homeDir))
+	if err != nil {
+		return "", err
+	}
+	for _, source := range c.EffectiveSources() {
+		if source.Harness == target.harness {
+			if existing, err := config.CanonicalHome(source.Home); err == nil && existing == home {
+				return source.ID, nil
+			}
+		}
+	}
+	return target.defaultID, nil
+}
+
 func installClientHook(ctx context.Context, c config.Config, s config.Source, exe string, out io.Writer) error {
 	adapter, err := agents.Builtins().Open(c, s)
 	if err != nil {
@@ -263,12 +284,5 @@ func activateInstallation(ctx context.Context, c config.Config, sources []config
 		return fmt.Errorf("Windows 服务已注册，启动失败：%w", err)
 	}
 	fmt.Fprintln(out, "Windows 服务已启动并加载监听配置。")
-	for _, s := range sources {
-		if s.Harness == "antigravity" {
-			if _, err := os.Stat(filepath.Join(s.Home, antigravity.SummaryFilename)); errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintf(out, "%s 尚未创建会话数据库。请先打开一次会话，再执行对应的 install 命令刷新服务读取权限。\n", s.ID)
-			}
-		}
-	}
 	return nil
 }

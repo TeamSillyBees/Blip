@@ -1,35 +1,40 @@
-# Antigravity 与 agy CLI
+# Antigravity 桌面版与 agy CLI
 
-Blip 只读监听 Antigravity 的本地会话摘要。本轮结束、助手提问或工具等待授权时，通知由已有的飞书、企业微信、Gotify 和 Webhook 渠道投递。
+Blip 通过客户端的原生 Hook 接收提问、显式权限申请和结束事件。回调把通知写入本地持久队列，后台进程负责投递到已配置的渠道。
 
-## 接入
+## 安装与升级
 
-按使用的客户端执行对应命令。两者都用时各执行一次。Windows 使用当前账户的管理员 PowerShell。
+Windows 使用当前账户的管理员 PowerShell。按实际使用的客户端执行命令，两端都用时各执行一次。从 `0.3.0` 升级到原生 Hook 版时也需要执行一次，以注册新回调并更新后台进程。
 
 ```powershell
 blip install antigravity   # 桌面版
-blip install agy           # agy CLI
+blip install agy           # CLI
 ```
 
-安装命令启用对应来源并启动或重启后台监听。桌面版默认读取 `~/.gemini/antigravity`，CLI 默认读取 `~/.gemini/antigravity-cli`。已经用 `sources add` 添加过同一目录时，安装命令沿用原来源 ID 和进度。用 `blip status` 查看运行状态。
+两端共用用户级 `~/.gemini/config/hooks.json`。Blip 为每个配置和来源建立独立的命名组，按回调携带的会话目录区分客户端。桌面版可在 Settings → Customizations → Hooks 查看，agy 可在交互界面输入 `/hooks`。[Google 官方 Hook 文档](https://antigravity.google/docs/hooks)
 
-npm 版 `0.3.0` 使用 `sources add` 手动接入。可以在 `blip install --help` 中检查当前程序是否包含上述两个快捷命令。
-
-使用自定义数据目录或单独的 `~/.gemini/antigravity-ide` 时，运行 `blip install antigravity --source my-ide --home <数据目录>`。目录应包含客户端的 `conversation_summaries.db`。
-
-Windows 首次接入自动注册并启动服务。再次接入会更新服务副本、授予所需数据库文件的读取权限并重启。若客户端首次创建或重建数据库后服务提示读取失败，再执行同一安装命令即可刷新权限。[Windows 服务说明](windows-service.md)
-
-这两种接入直接读取会话数据库。`doctor` 中的 `installation: not_required` 表示客户端无需安装 Hook。
+默认来源分别为 `antigravity-app`（`~/.gemini/antigravity`）和 `agy`（`~/.gemini/antigravity-cli`）。已有相同目录的来源会沿用原 ID。自定义数据目录可运行 `blip install antigravity --source my-ide --home <数据目录>`。这里的目录应与客户端报告的会话目录所属的数据目录一致。
 
 ## 提醒条件
 
-| 在客户端观察到的状态 | Blip 提醒 |
+| 原生回调 | Blip 提醒 |
 | --- | --- |
-| 根会话已完全空闲，执行器以 `NO_TOOL_CALL` 结束 | 本轮已结束 |
-| 步骤正在等待提问、MCP elicitation 或阻塞式反馈 | 需要回复，提问附原生选项 |
-| 步骤正在等待原生权限或审批交互，包括普通命令触发的授权 | 需要确认，附可用的工具名 |
-| 执行器出错、达到步数或 token 限制，或被终止步骤停下 | 运行遇到问题或已停下，请查看 |
+| `PreToolUse` 调用 `ask_question` | 需要回复，附问题和选项 |
+| `PreToolUse` 调用 `ask_permission` | 工具已发起显式权限申请 |
+| `Stop` 报告完全空闲并正常结束 | 本轮已结束 |
+| `Stop` 报告完全空闲并因错误、执行上限或终止步骤停下 | 运行遇到问题或已停下 |
 
-自动放行的工具调用、后台执行中的暂时空闲、子会话和已识别的用户取消均保持静默。用自然语言写在最终回复里的问题随本轮结束提醒处理。
+普通命令、文件或 MCP 工具的隐式审批，以及工具运行中由 MCP 服务端发起的提问，都缺少对应的原生 Hook。Blip 无法为这些弹窗发出提醒。如果其他停止钩子要求继续执行，本次 `Stop` 之后仍可能出现新活动。[Google 支持的事件](https://antigravity.google/docs/hooks#supported-events)
 
-首次启动会跳过已结束的历史轮次，并提醒摘要中仍在等待的请求。来源分别保存去重状态，队列写入成功后才记录新提醒。重启时能看到每个会话最新保存的状态；两次采集之间已经出现并消失的请求，或离线时被后续轮次覆盖的状态，可能漏收。该接入依赖客户端的本地数据库格式，验证版本和样本见[兼容性记录](compatibility.md)。
+`PreInvocation` 提供区分连续轮次的步骤位置。Blip 结合来源、会话和工具调用 ID 或步骤位置去重。通知从 Hook 启用后开始采集，已经入队的通知可在后台重启后继续投递。
+
+## 检查与卸载
+
+```powershell
+blip doctor --source antigravity-app
+blip doctor --source agy
+blip uninstall antigravity
+blip uninstall agy
+```
+
+`doctor` 显示注册状态、能力范围和最近回调。卸载按来源移除对应的 Blip 回调组。使用自定义来源时可加 `--source <ID>`。

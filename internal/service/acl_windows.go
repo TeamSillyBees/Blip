@@ -141,7 +141,7 @@ func sourcePermissionTargets(m installMetadata) []permissionTarget {
 		if source.Enabled {
 			if source.Harness == "antigravity" {
 				if _, err := os.Lstat(source.Home); os.IsNotExist(err) {
-					continue // this read-only listener does not create a client's home
+					continue // the shared hooks can be installed before the client starts
 				}
 			}
 			// Grant identity lookup without listing or inheriting access to the home.

@@ -190,9 +190,6 @@ func Install(ctx context.Context, opts InstallOptions) (result error) {
 	if _, err = grantPermission(permissionTarget{directory, readExecute, inheritChildren, true}, sid); err != nil {
 		return fmt.Errorf("grant service executable access: %w", err)
 	}
-	if err := prepareSourceDatabases(ctx, metadata.Sources); err != nil {
-		return err
-	}
 	for _, target := range permissionTargets(metadata) {
 		if err = ctx.Err(); err != nil {
 			return err

@@ -78,7 +78,7 @@ func TestHookErrorsReturnNeutralAndRecordOnlyErrorCode(t *testing.T) {
 	}
 }
 
-func TestAntigravitySourceNeedsOnlyTheDatabase(t *testing.T) {
+func TestAntigravitySourceNeedsHookInstallation(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "blip.json")
 	cfg := config.Config{SchemaVersion: 2, Sources: []config.Source{}, StateDir: filepath.Join(root, "state"), Destinations: []config.Destination{}}
@@ -96,10 +96,10 @@ func TestAntigravitySourceNeedsOnlyTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	var result struct{ Sources []agents.SourceStatus }
-	if err := json.Unmarshal(output.Bytes(), &result); err != nil || len(result.Sources) != 1 || result.Sources[0].Installation != "not_required" || len(result.Sources[0].Capabilities) != 4 {
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil || len(result.Sources) != 1 || result.Sources[0].Installation != "not_installed" || len(result.Sources[0].Capabilities) != 4 {
 		t.Fatalf("wrong doctor result: %s", output.Bytes())
 	}
 	if _, err := os.Stat(home); !os.IsNotExist(err) {
-		t.Fatalf("registering a read-only source changed the agent home: %v", err)
+		t.Fatalf("registering a source changed the agent home: %v", err)
 	}
 }

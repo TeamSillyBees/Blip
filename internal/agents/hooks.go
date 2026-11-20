@@ -16,6 +16,8 @@ import (
 const MaxHookBytes = 1024 * 1024
 const HookBudget = 3 * time.Second
 
+var errForeignHook = errors.New("callback belongs to another client data directory")
+
 type HookDiagnostic struct {
 	ReceivedAt  time.Time  `json:"received_at"`
 	LastEventAt *time.Time `json:"last_event_at,omitempty"`
@@ -51,7 +53,11 @@ func ReadHook(ctx context.Context, reader io.Reader) ([]byte, error) {
 
 // Capture never sends over the network. Errors are returned for diagnostics;
 // command adapters keep their neutral stdout and exit status separately.
-func Capture(ctx context.Context, c config.Config, id string, reader io.Reader) (result error) {
+func Capture(ctx context.Context, c config.Config, id string, reader io.Reader) error {
+	return capture(ctx, c, id, reader, Builtins())
+}
+
+func capture(ctx context.Context, c config.Config, id string, reader io.Reader, registry Registry) (result error) {
 	const diagnosticBudget = 50 * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, HookBudget-diagnosticBudget)
 	defer cancel()
@@ -59,6 +65,10 @@ func Capture(ctx context.Context, c config.Config, id string, reader io.Reader) 
 	diagnostic := HookDiagnostic{ReceivedAt: received}
 	if config.ValidSourceID(id) {
 		defer func() {
+			if errors.Is(result, errForeignHook) {
+				result = nil
+				return
+			}
 			if result != nil {
 				diagnostic.ErrorCode = "hook_failed"
 				if errors.Is(result, ErrCheckpoint) {
@@ -95,7 +105,7 @@ func Capture(ctx context.Context, c config.Config, id string, reader io.Reader) 
 			}
 		}
 	}()
-	adapter, err := Builtins().Open(c, source)
+	adapter, err := registry.Open(c, source)
 	if err != nil {
 		return err
 	}

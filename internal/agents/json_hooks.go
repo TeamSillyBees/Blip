@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -29,12 +30,16 @@ type jsonHookManifest struct {
 	Entries []jsonHookEntry `json:"entries"`
 }
 type jsonHookInstaller struct {
-	config config.Config
-	source config.Source
-	path   string
+	config     config.Config
+	source     config.Source
+	path       string
+	recordName string
 }
 
 func (i jsonHookInstaller) manifestPath() string {
+	if i.recordName != "" {
+		return filepath.Join(StateDir(i.config, i.source), i.recordName)
+	}
 	return filepath.Join(StateDir(i.config, i.source), "installation.json")
 }
 func jsonEqual(a, b any) bool {
@@ -59,7 +64,9 @@ func readHookSettings(path string) (map[string]any, []byte, os.FileMode, error) 
 		return nil, nil, 0, err
 	}
 	var root map[string]any
-	if json.Unmarshal(data, &root) != nil || root == nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber() // preserve numeric values in unrelated user settings
+	if decoder.Decode(&root) != nil || root == nil || decoder.Decode(new(any)) != io.EOF {
 		return nil, nil, 0, fmt.Errorf("invalid hook settings; no configuration changed")
 	}
 	return root, data, info.Mode().Perm(), nil
@@ -83,6 +90,15 @@ func (i jsonHookInstaller) manifest() (jsonHookManifest, error) {
 }
 
 func (i jsonHookInstaller) edit(ctx context.Context, entries []jsonHookEntry, install bool) error {
+	return i.editSettings(ctx, entries, install, updateClaudeHookSettings)
+}
+
+func (i jsonHookInstaller) editSettings(ctx context.Context, entries []jsonHookEntry, install bool, update func(map[string]any, []jsonHookEntry, []jsonHookEntry, bool) error) error {
+	if !install {
+		if _, err := os.Stat(i.manifestPath()); errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(i.path), 0700); err != nil {
 		return err
 	}
@@ -97,93 +113,17 @@ func (i jsonHookInstaller) edit(ctx context.Context, entries []jsonHookEntry, in
 	}
 	defer lock.Close()
 	previous, err := i.manifest()
-	if err != nil {
+	if err != nil || (!install && len(previous.Entries) == 0) {
 		return err
 	}
 	root, original, mode, err := readHookSettings(i.path)
 	if err != nil {
 		return err
 	}
-	if install && (root["disableAllHooks"] == true || root["allowManagedHooksOnly"] == true) {
-		return fmt.Errorf("hooks are explicitly disabled or restricted to managed hooks; no settings changed")
-	}
-	hooks := map[string]any{}
-	if value, exists := root["hooks"]; exists {
-		var valid bool
-		hooks, valid = value.(map[string]any)
-		if !valid {
-			return fmt.Errorf("hooks must be an object")
-		}
+	if err := update(root, previous.Entries, entries, install); err != nil {
+		return err
 	}
 	owned := append(append([]jsonHookEntry{}, previous.Entries...), entries...)
-	for name, value := range hooks {
-		groups, valid := value.([]any)
-		if !valid {
-			return fmt.Errorf("hook event groups must be arrays")
-		}
-		keptGroups := []any{}
-		for _, value := range groups {
-			group, valid := value.(map[string]any)
-			if !valid {
-				return fmt.Errorf("hook group must be an object")
-			}
-			handlers, valid := group["hooks"].([]any)
-			if !valid {
-				return fmt.Errorf("hook handlers must be an array")
-			}
-			keptHandlers := []any{}
-			removed := false
-			for _, raw := range handlers {
-				handler, valid := raw.(map[string]any)
-				if !valid {
-					return fmt.Errorf("hook handler must be an object")
-				}
-				match := false
-				for _, entry := range owned {
-					matcher, _ := group["matcher"].(string)
-					if name == entry.Event && matcher == entry.Matcher && jsonEqual(handler, entry.Hook) {
-						match = true
-						break
-					}
-				}
-				if !match {
-					for _, entry := range previous.Entries {
-						if sameHookCommand(handler, entry.Hook) {
-							return fmt.Errorf("Blip hook entry was edited or moved; restore the recorded entry before updating or uninstalling")
-						}
-					}
-					keptHandlers = append(keptHandlers, handler)
-				} else {
-					removed = true
-				}
-			}
-			if removed && len(keptHandlers) == 0 {
-				continue
-			}
-			group["hooks"] = keptHandlers
-			keptGroups = append(keptGroups, group)
-		}
-		if len(keptGroups) == 0 && len(groups) > 0 {
-			delete(hooks, name)
-		} else {
-			hooks[name] = keptGroups
-		}
-	}
-	if install {
-		for _, entry := range entries {
-			group := map[string]any{"hooks": []any{entry.Hook}}
-			if entry.Matcher != "" {
-				group["matcher"] = entry.Matcher
-			}
-			groups, _ := hooks[entry.Event].([]any)
-			hooks[entry.Event] = append(groups, group)
-		}
-	}
-	if len(hooks) == 0 {
-		delete(root, "hooks")
-	} else {
-		root["hooks"] = hooks
-	}
 	updated, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return err
@@ -223,6 +163,90 @@ func (i jsonHookInstaller) edit(ctx context.Context, entries []jsonHookEntry, in
 	}
 	if err := os.Remove(i.manifestPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	return nil
+}
+
+func updateClaudeHookSettings(root map[string]any, previous, entries []jsonHookEntry, install bool) error {
+	if install && (root["disableAllHooks"] == true || root["allowManagedHooksOnly"] == true) {
+		return fmt.Errorf("hooks are explicitly disabled or restricted to managed hooks; no settings changed")
+	}
+	hooks := map[string]any{}
+	if value, exists := root["hooks"]; exists {
+		var valid bool
+		hooks, valid = value.(map[string]any)
+		if !valid {
+			return fmt.Errorf("hooks must be an object")
+		}
+	}
+	owned := append(append([]jsonHookEntry{}, previous...), entries...)
+	for name, value := range hooks {
+		groups, valid := value.([]any)
+		if !valid {
+			return fmt.Errorf("hook event groups must be arrays")
+		}
+		keptGroups := []any{}
+		for _, value := range groups {
+			group, valid := value.(map[string]any)
+			if !valid {
+				return fmt.Errorf("hook group must be an object")
+			}
+			handlers, valid := group["hooks"].([]any)
+			if !valid {
+				return fmt.Errorf("hook handlers must be an array")
+			}
+			keptHandlers := []any{}
+			removed := false
+			for _, raw := range handlers {
+				handler, valid := raw.(map[string]any)
+				if !valid {
+					return fmt.Errorf("hook handler must be an object")
+				}
+				match := false
+				for _, entry := range owned {
+					matcher, _ := group["matcher"].(string)
+					if name == entry.Event && matcher == entry.Matcher && jsonEqual(handler, entry.Hook) {
+						match = true
+						break
+					}
+				}
+				if !match {
+					for _, entry := range previous {
+						if sameHookCommand(handler, entry.Hook) {
+							return fmt.Errorf("Blip hook entry was edited or moved; restore the recorded entry before updating or uninstalling")
+						}
+					}
+					keptHandlers = append(keptHandlers, handler)
+				} else {
+					removed = true
+				}
+			}
+			if removed && len(keptHandlers) == 0 {
+				continue
+			}
+			group["hooks"] = keptHandlers
+			keptGroups = append(keptGroups, group)
+		}
+		if len(keptGroups) == 0 && len(groups) > 0 {
+			delete(hooks, name)
+		} else {
+			hooks[name] = keptGroups
+		}
+	}
+	if install {
+		for _, entry := range entries {
+			group := map[string]any{"hooks": []any{entry.Hook}}
+			if entry.Matcher != "" {
+				group["matcher"] = entry.Matcher
+			}
+			groups, _ := hooks[entry.Event].([]any)
+			hooks[entry.Event] = append(groups, group)
+		}
+	}
+	if len(hooks) == 0 {
+		delete(root, "hooks")
+	} else {
+		root["hooks"] = hooks
 	}
 	return nil
 }

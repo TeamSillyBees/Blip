@@ -22,7 +22,7 @@ func TestChineseHelpAcrossCommandTree(t *testing.T) {
 			commands = append(commands, action+" "+harness)
 		}
 	}
-	commands = append(commands, "install agy", "install antigravity")
+	commands = append(commands, "install agy", "uninstall agy")
 	for _, action := range []string{"install", "uninstall", "start", "stop", "restart", "status", "run"} {
 		commands = append(commands, "service "+action)
 	}

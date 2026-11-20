@@ -2,7 +2,7 @@
 
 Blip 的 npm 包包含一个轻量 Node.js 启动器，并通过 npm 的可选依赖安装 Windows x64 的 Go 可执行文件。用户不需要 Go 编译器，安装期间不执行下载脚本。命令名称为 `blip`；后台进程直接运行本地 Go 程序，Codex hook 通过固定脚本转发到该程序，不依赖 Node.js 启动器或 PATH 查找。
 
-在 Windows x64 上使用 `npm install -g @teamsillybees/blip@latest` 安装正式版。自 `0.3.0` 起，Blip 支持 Antigravity 桌面版和 `agy` CLI 的任务完成、等待输入和权限请求提醒。启动器和 Windows x64 原生包使用同一版本。[Antigravity 接入说明](antigravity.md)
+在 Windows x64 上使用 `npm install -g @teamsillybees/blip@latest` 安装正式版。`0.3.1` 起，Antigravity 桌面版和 `agy` CLI 通过原生 Hook 接收通知。从 `0.3.0` 升级后，按使用的客户端运行 `blip install antigravity` 或 `blip install agy` 注册回调。启动器和 Windows x64 原生包使用同一版本。[Antigravity 接入说明](antigravity.md)
 
 ## 本地构建并安装
 
@@ -15,7 +15,7 @@ npm run build:npm:current
 输出位于 `dist/npm/`，包含启动器和当前平台原生包。Windows x64 的本地安装命令为：
 
 ```powershell
-npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.3.0.tgz ./dist/npm/teamsillybees-blip-0.3.0.tgz
+npm install --global --offline --include=optional ./dist/npm/teamsillybees-blip-win32-x64-0.3.1.tgz ./dist/npm/teamsillybees-blip-0.3.1.tgz
 blip version
 blip
 ```
@@ -63,8 +63,8 @@ npm run test:npm-install
 具备 `@teamsillybees` scope 发布权限后，先发布 Windows x64 原生包，再发布启动器包。仅发布本次 `manifest.json` 中列出的两个包，不使用可能包含历史构建的目录通配符。正式版本使用 `latest` 标签，例如：
 
 ```powershell
-npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.3.0.tgz --access public --tag latest
-npm publish ./dist/npm/teamsillybees-blip-0.3.0.tgz --access public --tag latest
+npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.3.1.tgz --access public --tag latest
+npm publish ./dist/npm/teamsillybees-blip-0.3.1.tgz --access public --tag latest
 ```
 
 预发行版本单独使用 `next` 标签。主包和 Windows x64 包保留历史版本，已有的 `0.2.0-dev.0` 仍可在 Windows x64 上通过 `@next` 安装。仓库脚本不会自动执行 publish。
