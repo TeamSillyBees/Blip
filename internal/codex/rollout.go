@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -75,9 +78,15 @@ type cursor struct {
 	HeaderHash string          `json:"header_hash,omitempty"`
 	AnchorHash string          `json:"anchor_hash,omitempty"`
 	InputTurn  *inputTurn      `json:"input_turn,omitempty"`
+	// These hints only apply to this process. Recheck the persisted header
+	// and anchor on restart, even for a replacement of the same size.
+	checkedAt time.Time
+	modified  time.Time
+	size      int64
 }
 type checkpoint struct {
 	Initialized bool               `json:"initialized"`
+	Baselining  bool               `json:"baselining,omitempty"`
 	BaselineAt  time.Time          `json:"baseline_at"`
 	Files       map[string]*cursor `json:"files"`
 }
@@ -86,6 +95,8 @@ type Collector struct {
 	StatePath   string
 	state       checkpoint
 	loaded      bool
+	dirty       bool
+	watch       *rolloutWatch
 	Observe     func(context.Context, Lifecycle) error
 }
 
@@ -270,43 +281,106 @@ func (c *Collector) Poll(ctx context.Context, emit func(event.Event) error) erro
 		}
 		c.loaded = true
 	}
-	initial := !c.state.Initialized
+	initial := !c.state.Initialized || c.state.Baselining
 	var failures []error
-	walkErr := filepath.WalkDir(c.SessionsDir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if errors.Is(walkErr, os.ErrNotExist) {
-			return nil
-		}
-		if walkErr != nil {
-			failures = append(failures, fmt.Errorf("cannot scan a Codex session directory"))
-			return nil
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "rollout-") || !strings.HasSuffix(entry.Name(), ".jsonl") {
-			return nil
-		}
-		if err := c.scanFile(ctx, path, initial, emit); err != nil {
+	now := time.Now()
+	changes := c.watch.changes(now)
+	visit := func(path string, force bool) {
+		if err := c.scanFile(ctx, path, initial, force, now, emit); err != nil {
 			failures = append(failures, err)
+			c.watch.rescan()
 		}
-		return nil
-	})
-	if walkErr != nil {
-		failures = append(failures, walkErr)
 	}
-	if initial && ctx.Err() != nil {
-		c.loaded = false
-		c.state = checkpoint{}
-		return ctx.Err()
+	if changes.walk || initial {
+		if c.watch != nil {
+			c.watch.pollFiles = c.watch.pollFiles[:0]
+		}
+		walkErr := filepath.WalkDir(c.SessionsDir, func(path string, entry fs.DirEntry, walkErr error) error {
+			if errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			if walkErr != nil {
+				failures = append(failures, fmt.Errorf("cannot scan a Codex session directory"))
+				c.watch.rescan()
+				return nil
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				c.watch.addDir(path)
+				return nil
+			}
+			if isRollout(entry.Name()) {
+				if runtime.GOOS == "windows" && c.watch != nil {
+					c.watch.pollFiles = append(c.watch.pollFiles, path)
+				}
+				visit(path, changes.verifyAll || changes.paths[path])
+			}
+			return nil
+		})
+		if walkErr != nil {
+			failures = append(failures, walkErr)
+			c.watch.rescan()
+		}
+	} else {
+		paths := slices.Sorted(maps.Keys(changes.paths))
+		if len(paths) == 0 {
+			paths = c.watch.pollFiles
+		} else {
+			for _, path := range c.watch.pollFiles {
+				if !changes.paths[path] {
+					paths = append(paths, path)
+				}
+			}
+		}
+		for _, path := range paths {
+			if err := ctx.Err(); err != nil {
+				failures = append(failures, err)
+				c.watch.rescan()
+				break
+			}
+			visit(path, changes.paths[path])
+		}
 	}
-	c.state.Initialized = true
-	if err := store.WriteJSON(c.StatePath, c.state); err != nil {
-		failures = append(failures, fmt.Errorf("save rollout checkpoint: %w", err))
+	if initial {
+		// A bounded initial scan can span polls. Retain its original cutoff
+		// and completed cursors so a subsequent pass cannot baseline away
+		// notifications that arrived during the first pass.
+		partial := ctx.Err() != nil
+		c.dirty = c.dirty || !c.state.Initialized || c.state.Baselining != partial
+		c.state.Initialized, c.state.Baselining = true, partial
+	}
+	if c.dirty {
+		if err := store.WriteJSON(c.StatePath, c.state); err != nil {
+			failures = append(failures, fmt.Errorf("save rollout checkpoint: %w", err))
+		} else {
+			c.dirty = false
+		}
 	}
 	return errors.Join(failures...)
 }
 
-func (c *Collector) scanFile(ctx context.Context, path string, initial bool, emit func(event.Event) error) error {
+func isRollout(name string) bool {
+	return strings.HasPrefix(name, "rollout-") && strings.HasSuffix(name, ".jsonl")
+}
+
+func (c *Collector) scanFile(ctx context.Context, path string, initial, force bool, now time.Time, emit func(event.Event) error) error {
+	position := c.state.Files[path]
+	if !force && position != nil && now.Sub(position.checkedAt) < 5*time.Minute {
+		// Windows directory listings can show the old size until an append
+		// handle closes. Query the path to see writes to a live session.
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err == nil && position.size == info.Size() && position.modified.Equal(info.ModTime()) {
+			return nil
+		}
+	}
+	if position != nil {
+		position.checkedAt = time.Time{} // Retry incomplete scans and read errors.
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -323,7 +397,7 @@ func (c *Collector) scanFile(ctx context.Context, path string, initial bool, emi
 	if err != nil {
 		return nil
 	} // A new or replaced file may still be writing its first line.
-	position, exists := c.state.Files[path]
+	exists := position != nil
 	reset := false
 	if exists {
 		reset = info.Size() < position.Offset || metadata.ID != position.Metadata.ID || metadata.SessionID != position.Metadata.SessionID || (position.HeaderHash != "" && header != position.HeaderHash)
@@ -347,24 +421,42 @@ func (c *Collector) scanFile(ctx context.Context, path string, initial bool, emi
 			}
 		}
 		c.state.Files[path] = position
+		c.dirty = true
+	}
+	if position.HeaderHash != header {
+		c.dirty = true
 	}
 	position.Metadata, position.HeaderHash = metadata, header
-	if !metadata.IsRoot() {
-		return nil
+	if metadata.IsRoot() {
+		offset := position.Offset
+		eof, readErr := c.read(ctx, file, position, emit)
+		if position.Offset != offset || (position.AnchorHash == "" && position.Offset > 0) {
+			c.dirty = true
+			anchor, err := anchorHash(file, position.Offset)
+			if err != nil {
+				// A concurrent truncate invalidated the offset we just read.
+				// Replay from the durable baseline instead of storing a stale anchor.
+				delete(c.state.Files, path)
+				return errors.Join(readErr, fmt.Errorf("cannot save Codex session read position"))
+			}
+			position.AnchorHash = anchor
+		}
+		if readErr != nil {
+			return readErr
+		}
+		if !eof {
+			c.watch.rescan() // The per-poll record budget left a backlog.
+			return nil
+		}
 	}
-	readErr := c.read(ctx, file, position, emit)
-	anchor, err := anchorHash(file, position.Offset)
-	if err != nil {
-		return errors.Join(readErr, fmt.Errorf("cannot save Codex session read position"))
-	}
-	position.AnchorHash = anchor
-	return readErr
+	position.size, position.modified, position.checkedAt = info.Size(), info.ModTime(), now
+	return nil
 }
 
-func (c *Collector) read(ctx context.Context, file *os.File, position *cursor, emit func(event.Event) error) error {
+func (c *Collector) read(ctx context.Context, file *os.File, position *cursor, emit func(event.Event) error) (bool, error) {
 	var err error
 	if _, err = file.Seek(position.Offset, io.SeekStart); err != nil {
-		return err
+		return false, err
 	}
 	reader := bufio.NewReader(file)
 	if position.Aborted == nil {
@@ -372,14 +464,14 @@ func (c *Collector) read(ctx context.Context, file *os.File, position *cursor, e
 	}
 	for i := 0; i < 2000; i++ {
 		if err = ctx.Err(); err != nil {
-			return err
+			return false, err
 		}
 		data, consumed, readErr := boundedLine(reader)
 		if readErr == io.EOF {
-			return nil
+			return true, nil
 		}
 		if readErr != nil {
-			return fmt.Errorf("cannot read Codex session record")
+			return false, fmt.Errorf("cannot read Codex session record")
 		}
 		var line record
 		if json.Unmarshal(data, &line) == nil {
@@ -393,31 +485,31 @@ func (c *Collector) read(ctx context.Context, file *os.File, position *cursor, e
 			if c.Observe != nil && line.Timestamp.After(c.state.BaselineAt) {
 				if signal := lifecycle(line, position); signal != nil {
 					if err = c.Observe(ctx, *signal); err != nil {
-						return err
+						return false, err
 					}
 				}
 			}
 			if line.Timestamp.After(c.state.BaselineAt) {
 				input, inputErr := rolloutInput(ctx, file, line, position)
 				if inputErr != nil {
-					return inputErr
+					return false, inputErr
 				}
 				if input != nil {
 					if err = emit(*input); err != nil {
-						return err
+						return false, err
 					}
 				}
 			}
 			notification := completeEvent(line, position)
 			if notification != nil && notification.OccurredAt.After(c.state.BaselineAt) {
 				if err = emit(*notification); err != nil {
-					return err
+					return false, err
 				}
 			}
 		}
 		position.Offset += consumed
 	}
-	return nil
+	return false, nil
 }
 
 func completeEvent(line record, position *cursor) *event.Event {

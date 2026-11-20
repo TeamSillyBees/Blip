@@ -106,6 +106,9 @@ func (q Queue) Enqueue(ctx context.Context, e event.Event, destinations []string
 	if err := e.Validate(); err != nil {
 		return false, err
 	}
+	if len(destinations) == 0 {
+		return false, nil
+	}
 	if err := os.MkdirAll(q.JobsDir(), 0700); err != nil {
 		return false, err
 	}

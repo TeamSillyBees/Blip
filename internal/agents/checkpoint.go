@@ -26,14 +26,14 @@ type checkpointFault struct {
 
 func (f *checkpointFault) Error() string { return ErrCheckpoint.Error() }
 func (f *checkpointFault) Unwrap() error { return ErrCheckpoint }
-func faultPath(c config.Config, id string) string {
+func CheckpointFaultPath(c config.Config, id string) string {
 	return filepath.Join(c.StateDir, "sources", id, "checkpoint-fault.json")
 }
 func checkpointFailed(kind, key, session string) error {
 	return &checkpointFault{Format: 1, Kind: kind, Key: key, SessionID: session}
 }
 func faultLock(ctx context.Context, c config.Config, id string) (*flock.Flock, error) {
-	path := faultPath(c, id)
+	path := CheckpointFaultPath(c, id)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
@@ -61,19 +61,19 @@ func RecordCheckpointFault(ctx context.Context, c config.Config, s config.Source
 	}
 	defer lock.Close()
 	// Keep the first unresolved incident; a concurrent failure cannot hide it.
-	if _, statErr := os.Stat(faultPath(c, s.ID)); statErr == nil {
+	if _, statErr := os.Stat(CheckpointFaultPath(c, s.ID)); statErr == nil {
 		return nil
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return statErr
 	}
-	return store.WriteJSON(faultPath(c, s.ID), fault)
+	return store.WriteJSON(CheckpointFaultPath(c, s.ID), fault)
 }
 
 // CheckSourceCheckpoint pauses every callback for a source after a detected
 // state fault. It clears the latch only after the exact checkpoint is restored
 // and validates again. Deleting the checkpoint is never treated as recovery.
 func CheckSourceCheckpoint(ctx context.Context, c config.Config, s config.Source) error {
-	path := faultPath(c, s.ID)
+	path := CheckpointFaultPath(c, s.ID)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
@@ -120,6 +120,6 @@ func CheckSourceCheckpoint(ctx context.Context, c config.Config, s config.Source
 }
 
 func hasCheckpointFault(c config.Config, id string) bool {
-	_, err := os.Stat(faultPath(c, id))
+	_, err := os.Stat(CheckpointFaultPath(c, id))
 	return err == nil || !errors.Is(err, os.ErrNotExist)
 }

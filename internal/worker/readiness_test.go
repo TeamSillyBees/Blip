@@ -53,14 +53,25 @@ func TestReadyCallbackRunsOnceAfterStatusIsPublished(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("worker never signalled readiness")
 	}
+	// Several idle collection passes should leave the status file alone.
+	time.Sleep(350 * time.Millisecond)
+	var idle Status
+	if err := store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &idle); err != nil || !idle.Heartbeat.Equal(initial.Heartbeat) {
+		t.Fatalf("idle polling rewrote ready status: %v", err)
+	}
+	line := `{"type":"session_meta","payload":{"id":"root","source":"cli"}}` + "\n" +
+		`{"timestamp":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","type":"event_msg","payload":{"type":"task_complete","turn_id":"new"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(c.CodexHome, "sessions", "rollout-new.jsonl"), []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		var current Status
-		if store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &current) == nil && current.Heartbeat.After(initial.Heartbeat) {
+		if store.ReadJSON(filepath.Join(c.StateDir, "worker.json"), &current) == nil && current.Heartbeat.After(initial.Heartbeat) && current.Sources[0].LastEventAt != nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("worker did not complete another collection pass")
+			t.Fatal("worker did not publish the new event before the heartbeat")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

@@ -109,6 +109,9 @@ func (a *codexAdapter) ConsumeHook(ctx context.Context, data []byte, now time.Ti
 	return nil
 }
 
+func (a *codexAdapter) Watch()       { a.collector.Watch() }
+func (a *codexAdapter) Close() error { return a.collector.Close() }
+
 func (a *codexAdapter) Poll(ctx context.Context, emit func(event.Event) error) error {
 	if a.source.EventVersion == 2 {
 		a.collector.Observe = func(ctx context.Context, signal codex.Lifecycle) error {

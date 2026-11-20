@@ -31,35 +31,45 @@ func CheckBinding(c config.Config, source config.Source) error {
 	if !config.ValidSourceID(source.ID) {
 		return ErrBinding
 	}
+	_, err := readBinding(bindingPath(c, source.ID), source)
+	return err
+}
+
+func readBinding(path string, source config.Source) (bool, error) {
 	var previous binding
-	err := store.ReadJSON(bindingPath(c, source.ID), &previous)
+	err := store.ReadJSON(path, &previous)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return ErrBinding
+		return false, ErrBinding
 	}
 	home, err := config.CanonicalHome(source.Home)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if previous.Format != 1 || previous.Source.ID != source.ID || previous.Source.Harness != source.Harness || previous.CanonicalHome != home {
-		return ErrBinding
+		return false, ErrBinding
 	}
-	return nil
+	return true, nil
 }
 
 // Bind reserves an ID permanently, including after removal from configuration.
 // A callback must never inherit another home, checkpoint or installation record.
 func Bind(ctx context.Context, c config.Config, source config.Source) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !config.ValidSourceID(source.ID) || source.Home == "" || (source.ID == config.DefaultSourceID && source.Harness != "codex") {
 		return ErrBinding
 	}
-	home, err := config.CanonicalHome(source.Home)
-	if err != nil {
+	// Bindings are published atomically and never updated. Only creation
+	// needs the cross-process lock and the second check under it.
+	path := bindingPath(c, source.ID)
+	if found, err := readBinding(path, source); found || err != nil {
 		return err
 	}
-	if err = os.MkdirAll(filepath.Join(c.StateDir, "sources"), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(c.StateDir, "sources"), 0700); err != nil {
 		return err
 	}
 	lock := flock.New(filepath.Join(c.StateDir, "sources", "bindings.lock"))
@@ -73,17 +83,12 @@ func Bind(ctx context.Context, c config.Config, source config.Source) error {
 		return fmt.Errorf("source bindings are busy")
 	}
 	defer lock.Close()
-	path := bindingPath(c, source.ID)
-	var previous binding
-	err = store.ReadJSON(path, &previous)
-	if err == nil {
-		if previous.Format != 1 || previous.Source.ID != source.ID || previous.Source.Harness != source.Harness || previous.CanonicalHome != home {
-			return ErrBinding
-		}
-		return nil
+	if found, err := readBinding(path, source); found || err != nil {
+		return err
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return ErrBinding
+	home, err := config.CanonicalHome(source.Home)
+	if err != nil {
+		return err
 	}
 	// Validate a legacy manifest before reserving its first explicit binding.
 	if source.ID == config.DefaultSourceID {

@@ -118,7 +118,7 @@ func capture(ctx context.Context, c config.Config, id string, reader io.Reader, 
 			e.ReceivedAt = received
 		}
 		e.DeviceName = c.DeviceName
-		if resolver, ok := adapter.(TitleResolver); ok {
+		if resolver, ok := adapter.(TitleResolver); ok && len(destinations) > 0 && e.SessionTitle == "" {
 			titleCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
 			e.SessionTitle = resolver.SessionTitle(titleCtx, e.SessionID)
 			stop()
@@ -154,14 +154,15 @@ func saveHookDiagnostic(ctx context.Context, c config.Config, id string, diagnos
 	defer lock.Close()
 	var previous HookDiagnostic
 	if store.ReadJSON(DiagnosticPath(c, id), &previous) == nil {
-		latestEvent := diagnostic.LastEventAt
-		if previous.LastEventAt != nil && (latestEvent == nil || previous.LastEventAt.After(*latestEvent)) {
-			latestEvent = previous.LastEventAt
-		}
 		if previous.ReceivedAt.After(diagnostic.ReceivedAt) {
+			if diagnostic.LastEventAt == nil || (previous.LastEventAt != nil && !diagnostic.LastEventAt.After(*previous.LastEventAt)) {
+				return nil
+			}
+			previous.LastEventAt = diagnostic.LastEventAt
 			diagnostic = previous
+		} else if previous.LastEventAt != nil && (diagnostic.LastEventAt == nil || previous.LastEventAt.After(*diagnostic.LastEventAt)) {
+			diagnostic.LastEventAt = previous.LastEventAt
 		}
-		diagnostic.LastEventAt = latestEvent
 	}
 	return store.WriteJSON(DiagnosticPath(c, id), diagnostic)
 }

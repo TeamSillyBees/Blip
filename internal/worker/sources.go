@@ -55,6 +55,11 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 	if closer, ok := collector.(io.Closer); ok {
 		defer closer.Close()
 	}
+	if watcher, ok := collector.(interface{ Watch() }); ok {
+		watcher.Watch()
+	}
+	destinations := DestinationIDs(c)
+	var previousState, previousError string
 	for {
 		update := sourceUpdate{state: "ready"}
 		pollCtx, stop := context.WithTimeout(ctx, 3*time.Second)
@@ -65,12 +70,12 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 					e.ReceivedAt = time.Now().UTC()
 				}
 				e.DeviceName = c.DeviceName
-				if resolver, ok := adapter.(agents.TitleResolver); ok {
+				if resolver, ok := adapter.(agents.TitleResolver); ok && len(destinations) > 0 && e.SessionTitle == "" {
 					titleCtx, cancel := context.WithTimeout(pollCtx, 50*time.Millisecond)
 					e.SessionTitle = resolver.SessionTitle(titleCtx, e.SessionID)
 					cancel()
 				}
-				_, err := queue.Enqueue(pollCtx, e, DestinationIDs(c))
+				_, err := queue.Enqueue(pollCtx, e, destinations)
 				if err != nil && pollCtx.Err() == nil {
 					update.fatal = err
 				}
@@ -101,7 +106,14 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 			update.state = "paused"
 			update.code = "checkpoint_invalid"
 		}
-		report(update)
+		var message string
+		if update.err != nil {
+			message = update.err.Error()
+		}
+		if previousState != update.state || previousError != message || update.eventAt != nil || update.fatal != nil {
+			report(update)
+			previousState, previousError = update.state, message
+		}
 		if pause || update.fatal != nil {
 			return
 		}

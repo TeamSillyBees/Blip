@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
@@ -154,21 +155,17 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stopDone := make(chan struct{})
-	go func() { defer close(stopDone); watchStop(ctx, stopPath, cancel, logger) }()
-	defer func() { cancel(); <-stopDone }()
-	status := Status{PID: os.Getpid(), StartedAt: time.Now().UTC(), Heartbeat: time.Now().UTC(), Sources: []agents.SourceStatus{}}
+	status := Status{PID: os.Getpid(), StartedAt: time.Now().UTC(), Sources: []agents.SourceStatus{}}
 	sources := c.EffectiveSources()
 	for _, source := range sources {
 		status.Sources = append(status.Sources, agents.Inspect(c, source))
 		status.Sources[len(status.Sources)-1].State = "checking"
 	}
-	if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
-		return err
-	}
 	dispatcher := Dispatcher{Queue: queue, Sender: channels.New(c.TimeoutDuration()), MaxAttempts: c.MaxAttempts, Timeout: c.TimeoutDuration(), DeviceName: c.DeviceName, ResolveTitle: func(ctx context.Context, e event.Event) string { return agents.ResolveTitle(ctx, c, e) }}
 	fatal := make(chan error, 1)
 	var group sync.WaitGroup
+	diagnostics := make(chan int, len(sources)+1)
+	group.Go(func() { watchWorkerState(ctx, c, sources, cancel, diagnostics, logger) })
 	destinations := c.Enabled()
 	var changes chan string
 	if len(destinations) > 0 {
@@ -186,18 +183,12 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 		group.Add(1)
 		go func() { defer group.Done(); collectSource(ctx, c, source, index, registry, queue, updates) }()
 	}
-	checked := make([]bool, len(sources))
 	collection := make([]sourceUpdate, len(sources))
-	for i := range collection {
-		collection[i].state = "checking"
-	}
-	interval := c.PollDuration()
-	if interval <= 0 || interval > time.Second {
-		interval = time.Second
-	}
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	var published Status
 	lastQuarantined := 0
+	reconcile := true
 	for {
 		status.CollectorError = ""
 		status.Degraded = false
@@ -205,11 +196,11 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 		for i := range status.Sources {
 			s := &status.Sources[i]
 			s.State, s.ErrorCode = collection[i].state, collection[i].code
-			agents.RefreshHookDiagnostic(c, s)
-			agents.ApplyHookHealth(s)
-			if !checked[i] {
+			if s.State == "" {
+				s.State = "checking"
 				status.Ready = false
 			}
+			agents.ApplyHookHealth(s)
 			if s.ErrorCode != "" {
 				status.Degraded = true
 				if s.ID == config.DefaultSourceID {
@@ -220,26 +211,28 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 		if ctx.Err() != nil {
 			return nil
 		}
-		status.Heartbeat = time.Now().UTC()
-		if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
-			return err
-		}
-		if ready != nil && status.Ready {
-			ready()
-			ready = nil
-		}
-		if count, countErr := queue.QuarantineCount(); countErr != nil {
-			logger.Printf("queue quarantine status: %v", countErr)
-		} else {
-			if count > lastQuarantined {
-				logger.Printf("queue has %d quarantined records; inspect the quarantine directory before recovering them", count)
+		if reconcile || !reflect.DeepEqual(published, status) {
+			status.Heartbeat = time.Now().UTC()
+			if err = store.WriteJSON(filepath.Join(c.StateDir, "worker.json"), status); err != nil {
+				return err
 			}
-			lastQuarantined = count
+			published = status
+			published.Sources = slices.Clone(status.Sources)
+			if ready != nil && status.Ready {
+				ready()
+				ready = nil
+			}
 		}
-		if _, err = os.Stat(stopPath); err == nil {
-			return nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
+		if reconcile {
+			if count, err := queue.QuarantineCount(); err != nil {
+				logger.Printf("queue quarantine status: %v", err)
+			} else {
+				if count > lastQuarantined {
+					logger.Printf("queue has %d quarantined records; inspect the quarantine directory before recovering them", count)
+				}
+				lastQuarantined = count
+			}
+			reconcile = false
 		}
 		select {
 		case <-ctx.Done():
@@ -247,11 +240,9 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 		case err = <-fatal:
 			return err
 		case update := <-updates:
-			checked[update.index] = true
 			collection[update.index] = update
 			s := &status.Sources[update.index]
-			s.State, s.ErrorCode = update.state, update.code
-			if update.eventAt != nil {
+			if update.eventAt != nil && (s.LastEventAt == nil || update.eventAt.After(*s.LastEventAt)) {
 				s.LastEventAt = update.eventAt
 			}
 			if update.err != nil && ctx.Err() == nil {
@@ -261,28 +252,20 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 				return update.fatal
 			}
 		case <-ticker.C:
-		}
-	}
-}
-
-// Stop must remain responsive while the collector sleeps or a sender awaits HTTP.
-func watchStop(ctx context.Context, path string, cancel context.CancelFunc, logger *log.Logger) {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_, err := os.Stat(path)
-			if err == nil {
-				cancel()
-				return
+			reconcile = true
+			for i := range status.Sources {
+				agents.RefreshHookDiagnostic(c, &status.Sources[i])
 			}
-			if !errors.Is(err, os.ErrNotExist) {
-				logger.Printf("cannot check stop request: %v", err)
-				cancel()
-				return
+		case index := <-diagnostics:
+			// A single atomic replacement can generate several notifications.
+			changed := map[int]bool{index: true}
+			for range len(diagnostics) {
+				changed[<-diagnostics] = true
+			}
+			for i := range status.Sources {
+				if changed[-1] || changed[i] {
+					agents.RefreshHookDiagnostic(c, &status.Sources[i])
+				}
 			}
 		}
 	}
