@@ -38,7 +38,8 @@ type Job struct {
 
 type Queue struct{ Dir string }
 
-func (q Queue) jobPath(id string) string { return filepath.Join(q.Dir, "jobs", id+".json") }
+func (q Queue) JobsDir() string          { return filepath.Join(q.Dir, "jobs") }
+func (q Queue) jobPath(id string) string { return filepath.Join(q.JobsDir(), id+".json") }
 
 var ErrQuarantined = errors.New("notification record is quarantined; inspect the preserved record before recovery")
 
@@ -105,7 +106,7 @@ func (q Queue) Enqueue(ctx context.Context, e event.Event, destinations []string
 	if err := e.Validate(); err != nil {
 		return false, err
 	}
-	if err := os.MkdirAll(filepath.Join(q.Dir, "jobs"), 0700); err != nil {
+	if err := os.MkdirAll(q.JobsDir(), 0700); err != nil {
 		return false, err
 	}
 	lock, err := q.mutationLock(ctx)
@@ -148,7 +149,7 @@ func (q Queue) Enqueue(ctx context.Context, e event.Event, destinations []string
 }
 
 func (q Queue) Load() ([]Job, error) {
-	entries, err := os.ReadDir(filepath.Join(q.Dir, "jobs"))
+	entries, err := os.ReadDir(q.JobsDir())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -160,27 +161,13 @@ func (q Queue) Load() ([]Job, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		var job Job
-		data, readErr := q.readJobFile(entry.Name())
-		if errors.Is(readErr, os.ErrNotExist) {
-			continue
-		} // A concurrent prune may remove a terminal record.
-		if readErr != nil {
-			return nil, fmt.Errorf("unreadable queue record %s", entry.Name())
+		job, err := q.loadJob(entry.Name())
+		if err != nil {
+			return nil, err
 		}
-		if decodeJob(data, entry.Name(), &job) != nil {
-			// Re-read under the mutation lock before isolating the file: a receipt
-			// update or another reader may have changed it since the first read.
-			recovered, quarantineErr := q.quarantine(entry.Name())
-			if quarantineErr != nil {
-				return nil, quarantineErr
-			}
-			if recovered != nil {
-				jobs = append(jobs, *recovered)
-			}
-			continue
+		if job != nil {
+			jobs = append(jobs, *job)
 		}
-		jobs = append(jobs, job)
 	}
 	// A later invalid record can claim an ID read earlier in this scan. Check
 	// every collected identity again, so such a conflict cannot be dispatched.
@@ -199,6 +186,22 @@ func (q Queue) Load() ([]Job, error) {
 		ready = append(ready, job)
 	}
 	return ready, nil
+}
+
+func (q Queue) loadJob(name string) (*Job, error) {
+	data, err := q.readJobFile(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil // A concurrent prune may have removed the record.
+	}
+	if err != nil {
+		return nil, fmt.Errorf("unreadable queue record %s: %w", name, err)
+	}
+	var job Job
+	if decodeJob(data, name, &job) != nil {
+		// Re-read under the mutation lock before isolating the file.
+		return q.quarantine(name)
+	}
+	return &job, nil
 }
 
 // ReadJob reads one job and its current receipts under the queue's shared lock.
@@ -233,7 +236,7 @@ func (q Queue) readJobFile(name string) ([]byte, error) {
 		return nil, fmt.Errorf("notification queue is busy")
 	}
 	defer lock.Unlock()
-	return os.ReadFile(filepath.Join(q.Dir, "jobs", name))
+	return os.ReadFile(filepath.Join(q.JobsDir(), name))
 }
 
 // Save serializes local state changes with enqueue, receipt updates and pruning.
@@ -264,6 +267,50 @@ func (q Queue) saveLocked(job Job) error {
 		return ErrQuarantined
 	}
 	return WriteJSON(q.jobPath(job.Event.ID), job)
+}
+
+// BeginAttempt checks the durable receipt before acting on a scheduling hint.
+// It records the first dispatch time before the sender contacts the destination.
+func (q Queue) BeginAttempt(ctx context.Context, id, destination string, due time.Time) (*event.Event, error) {
+	if !validID(id) {
+		return nil, fmt.Errorf("invalid notification ID")
+	}
+	lock, err := q.mutationLock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Unlock()
+	if blocked, err := q.blocked(id); blocked || err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(q.jobPath(id))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var job Job
+	if err = decodeJob(data, id+".json", &job); err != nil {
+		// The scheduler refreshes this record after a skipped attempt and
+		// applies the same quarantine handling as a full scan.
+		return nil, nil
+	}
+	for i := range job.Deliveries {
+		r := &job.Deliveries[i]
+		if r.DestinationID != destination || r.DeliveredAt != nil || r.Failed || r.NextAttempt.After(due) {
+			continue
+		}
+		if r.FirstAttemptAt == nil && r.Attempts == 0 {
+			started := time.Now().UTC()
+			r.FirstAttemptAt = &started
+			if err = q.saveLocked(job); err != nil {
+				return nil, err
+			}
+		}
+		return &job.Event, nil
+	}
+	return nil, nil
 }
 
 // UpdateDelivery merges one receipt with the latest file, avoiding lost updates
@@ -308,23 +355,30 @@ func (q Queue) WorkerLock() (*flock.Flock, bool, error) {
 }
 
 func (q Queue) Prune(now time.Time) error {
-	jobs, err := q.Load()
+	index, err := q.PendingIndex()
 	if err != nil {
 		return err
 	}
-	for _, job := range jobs {
-		if now.Sub(job.CreatedAt) < 7*24*time.Hour {
-			continue
+	return q.PruneJobs(context.Background(), index.CleanupCandidates(now), now)
+}
+
+func (q Queue) PruneJobs(ctx context.Context, ids []string, now time.Time) error {
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if err := q.pruneJob(job.Event.ID, now); err != nil {
+		if !validID(id) {
+			return fmt.Errorf("invalid notification ID")
+		}
+		if err := q.pruneJob(ctx, id, now); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (q Queue) pruneJob(id string, now time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+func (q Queue) pruneJob(ctx context.Context, id string, now time.Time) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	lock, err := q.mutationLock(ctx)
 	if err != nil {
@@ -345,29 +399,51 @@ func (q Queue) pruneJob(id string, now time.Time) error {
 	if err = validateJob(job, id+".json"); err != nil {
 		return err
 	}
-	latest := job.CreatedAt
-	for _, d := range job.Deliveries {
-		if d.DeliveredAt == nil && !d.Failed {
-			return nil
-		}
-		finished := d.DeliveredAt
-		if d.Failed {
-			finished = d.FailedAt
-		}
-		if finished == nil {
-			return q.saveLocked(job)
-		} // Old failures get a full retention window after migration.
-		if finished.After(latest) {
-			latest = *finished
-		}
-	}
-	if now.Sub(latest) < 7*24*time.Hour {
+	retention := job.retention()
+	if retention.checkAt.IsZero() || now.Before(retention.checkAt) {
 		return nil
+	}
+	if retention.migrate {
+		return q.saveLocked(job) // Give legacy failures a full retention window.
 	}
 	if err = os.Remove(q.jobPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
+}
+
+type jobRetention struct {
+	pending bool
+	migrate bool
+	checkAt time.Time
+}
+
+func (job Job) retention() (r jobRetention) {
+	const retention = 7 * 24 * time.Hour
+	latest := job.CreatedAt
+	for _, d := range job.Deliveries {
+		finished := d.DeliveredAt
+		if d.Failed {
+			finished = d.FailedAt
+			if finished == nil {
+				r.migrate = true
+				continue
+			}
+		}
+		if finished == nil {
+			r.pending = true
+			continue
+		}
+		if finished.After(latest) {
+			latest = *finished
+		}
+	}
+	if r.migrate {
+		r.checkAt = job.CreatedAt.Add(retention)
+	} else if !r.pending {
+		r.checkAt = latest.Add(retention)
+	}
+	return r
 }
 
 func decodeJob(data []byte, name string, job *Job) error {
@@ -426,7 +502,7 @@ func (q Queue) quarantine(name string) (*Job, error) {
 		return nil, err
 	}
 	defer lock.Unlock()
-	path := filepath.Join(q.Dir, "jobs", name)
+	path := filepath.Join(q.JobsDir(), name)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

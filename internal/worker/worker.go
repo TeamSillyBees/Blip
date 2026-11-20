@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -38,69 +38,63 @@ func (d Dispatcher) DeliverOnce(ctx context.Context, destination config.Destinat
 	if err != nil {
 		return false, err
 	}
-	sort.SliceStable(jobs, func(i, j int) bool { return jobs[i].CreatedAt.Before(jobs[j].CreatedAt) })
-	for _, job := range jobs {
-		for _, receipt := range job.Deliveries {
-			if receipt.DestinationID != destination.ID || receipt.DeliveredAt != nil || receipt.Failed || receipt.NextAttempt.After(now) {
-				continue
-			}
-			notification := job.Event
-			// Records created before device names were supported have no label.
-			// Keep names already captured at enqueue time unchanged across retries.
-			if notification.DeviceName == "" {
-				notification.DeviceName = d.DeviceName
-			}
-			// Older jobs and chats named after enqueueing can acquire their title
-			// at delivery time. Preserve titles already captured by the event.
-			if notification.SessionTitle == "" {
-				titleCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
-				if d.ResolveTitle != nil {
-					notification.SessionTitle = d.ResolveTitle(titleCtx, notification)
-				} else if notification.SchemaVersion == 1 && notification.Agent == "codex" {
-					notification.SessionTitle = agents.ResolveTitle(titleCtx, config.Config{CodexHome: d.CodexHome}, notification)
-				}
-				stop()
-			}
-			if receipt.FirstAttemptAt == nil && receipt.Attempts == 0 {
-				// Persist the start of dispatch before calling the sender. This is
-				// a local attempt marker, not a receipt of network delivery.
-				startedAt := time.Now().UTC()
-				writeCtx, stop := context.WithTimeout(ctx, 3*time.Second)
-				err = d.Queue.UpdateDelivery(writeCtx, job.Event.ID, destination.ID, func(current *store.Delivery) {
-					if current.FirstAttemptAt == nil && current.Attempts == 0 {
-						current.FirstAttemptAt = &startedAt
-					}
-				})
-				stop()
-				if err != nil {
-					return false, err
-				}
-			}
-			sendCtx, cancel := context.WithTimeout(ctx, d.Timeout)
-			sendErr := d.Sender.Send(sendCtx, destination, notification)
-			cancel()
-			finishedAt := time.Now().UTC()
-			if ctx.Err() != nil {
-				return true, ctx.Err()
-			} // Shutdown leaves the job pending.
-			writeCtx, writeCancel := context.WithTimeout(ctx, 3*time.Second)
-			err = d.Queue.UpdateDelivery(writeCtx, job.Event.ID, destination.ID, func(current *store.Delivery) {
-				current.Attempts++
-				current.LastAttemptAt = &finishedAt
-				if sendErr == nil {
-					current.DeliveredAt = &finishedAt
-					current.LastError = ""
-					return
-				}
-				current.LastError = sendErr.Error() // Sender errors intentionally exclude endpoints, bodies and credentials.
-				current.Failed = current.Attempts >= d.MaxAttempts || !channels.Retryable(sendErr)
-				current.NextAttempt = finishedAt.Add(Backoff(current.Attempts))
-			})
-			writeCancel()
-			return true, err
-		}
+	id, _ := nextDelivery(slices.Values(jobs), destination.ID, now)
+	if id == "" {
+		return false, nil
 	}
-	return false, nil
+	return d.deliver(ctx, destination, id, now)
+}
+
+func (d Dispatcher) deliver(ctx context.Context, destination config.Destination, id string, due time.Time) (bool, error) {
+	startCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+	notification, err := d.Queue.BeginAttempt(startCtx, id, destination.ID, due)
+	stop()
+	if err != nil || notification == nil {
+		return false, err
+	}
+	// Records created before device names were supported have no label.
+	// Keep names already captured at enqueue time unchanged across retries.
+	if notification.DeviceName == "" {
+		notification.DeviceName = d.DeviceName
+	}
+	// Older jobs and chats named after enqueueing can acquire their title
+	// at delivery time. Preserve titles already captured by the event.
+	if notification.SessionTitle == "" {
+		titleCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
+		if d.ResolveTitle != nil {
+			notification.SessionTitle = d.ResolveTitle(titleCtx, *notification)
+		} else if notification.SchemaVersion == 1 && notification.Agent == "codex" {
+			notification.SessionTitle = agents.ResolveTitle(titleCtx, config.Config{CodexHome: d.CodexHome}, *notification)
+		}
+		stop()
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, d.Timeout)
+	sendErr := d.Sender.Send(sendCtx, destination, *notification)
+	cancel()
+	finishedAt := time.Now().UTC()
+	if ctx.Err() != nil {
+		return true, ctx.Err()
+	} // Shutdown leaves the job pending.
+	writeCtx, writeCancel := context.WithTimeout(ctx, 3*time.Second)
+	err = d.Queue.UpdateDelivery(writeCtx, notification.ID, destination.ID, func(current *store.Delivery) {
+		current.Attempts++
+		current.LastAttemptAt = &finishedAt
+		if sendErr == nil {
+			current.DeliveredAt = &finishedAt
+			current.LastError = ""
+			return
+		}
+		current.LastError = sendErr.Error() // Sender errors intentionally exclude endpoints, bodies and credentials.
+		current.Failed = current.Attempts >= d.MaxAttempts || !channels.Retryable(sendErr)
+		current.NextAttempt = finishedAt.Add(Backoff(current.Attempts))
+	})
+	writeCancel()
+	if errors.Is(err, store.ErrQuarantined) {
+		// A conflicting record was isolated while this send was in flight.
+		// The blocked marker prevents another attempt for this event.
+		return true, nil
+	}
+	return true, err
 }
 
 func Backoff(attempt int) time.Duration {
@@ -150,7 +144,8 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 		return fmt.Errorf("a Blip worker is already running for this configuration")
 	}
 	defer lock.Unlock()
-	if _, err = queue.Load(); err != nil {
+	pending, err := queue.PendingIndex()
+	if err != nil {
 		return err
 	}
 	stopPath := filepath.Join(c.StateDir, "stop")
@@ -174,39 +169,17 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 	dispatcher := Dispatcher{Queue: queue, Sender: channels.New(c.TimeoutDuration()), MaxAttempts: c.MaxAttempts, Timeout: c.TimeoutDuration(), DeviceName: c.DeviceName, ResolveTitle: func(ctx context.Context, e event.Event) string { return agents.ResolveTitle(ctx, c, e) }}
 	fatal := make(chan error, 1)
 	var group sync.WaitGroup
-	for _, destination := range c.Enabled() {
-		group.Add(1)
-		go func(destination config.Destination) {
-			defer group.Done()
-			for {
-				attempted, sendErr := dispatcher.DeliverOnce(ctx, destination, time.Now().UTC())
-				if sendErr != nil && ctx.Err() == nil {
-					select {
-					case fatal <- fmt.Errorf("delivery state: %w", sendErr):
-					default:
-					}
-					return
-				}
-				interval := c.PollDuration()
-				if interval <= 0 || interval > 250*time.Millisecond {
-					interval = 250 * time.Millisecond
-				}
-				if attempted && destination.Kind == "wecom" {
-					interval = 3100 * time.Millisecond
-				}
-				if attempted && destination.Kind == "feishu" {
-					interval = 650 * time.Millisecond
-				}
-				timer := time.NewTimer(interval)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
-		}(destination)
+	destinations := c.Enabled()
+	var changes chan string
+	if len(destinations) > 0 {
+		changes = make(chan string, 128)
+		group.Go(func() { watchQueue(ctx, queue.JobsDir(), changes, logger) })
 	}
+	group.Go(func() {
+		if err := dispatcher.runDeliveries(ctx, destinations, pending, changes, logger); err != nil && ctx.Err() == nil {
+			fatal <- fmt.Errorf("delivery state: %w", err)
+		}
+	})
 	defer func() { cancel(); group.Wait() }()
 	updates := make(chan sourceUpdate, len(sources)*2+1)
 	for index, source := range sources {
@@ -224,7 +197,6 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	lastPrune := time.Time{}
 	lastQuarantined := 0
 	for {
 		status.CollectorError = ""
@@ -255,12 +227,6 @@ func runWithRegistry(ctx context.Context, c config.Config, logger *log.Logger, r
 		if ready != nil && status.Ready {
 			ready()
 			ready = nil
-		}
-		if time.Since(lastPrune) >= time.Hour {
-			if err = queue.Prune(time.Now().UTC()); err != nil {
-				logger.Printf("queue cleanup: %v", err)
-			}
-			lastPrune = time.Now()
 		}
 		if count, countErr := queue.QuarantineCount(); countErr != nil {
 			logger.Printf("queue quarantine status: %v", countErr)
