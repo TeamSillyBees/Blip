@@ -71,6 +71,6 @@ git push origin v0.4.1
 
 GitHub Actions 从标签读取版本，写入两个发布包、启动器的原生依赖和 Go 程序。本地普通构建仍从两个 `package.json` 读取版本。工作流运行三平台检查，在 Windows 试装，然后按 `dist/npm/manifest.json` 的哈希依次发布原生包和启动器，最后从公共 npm 安装并运行 `blip version`。正式版本使用 `latest`，预发行标签（如 `v0.4.1-rc.1`）使用 `next`。
 
-在 GitHub 的 **Actions → Publish to npm → Run workflow** 可以演练构建、试装、两个包的 OIDC 授权和 npm 上传预检。只有推送版本标签才会上架。若中途失败，选择 **Re-run failed jobs** 可沿用原测试产物，已发布且哈希相同的包会跳过。
+在 GitHub 的 **Actions → Publish to npm → Run workflow** 可以演练构建、试装、两个包的 OIDC 授权和 npm 上传预检。只有推送版本标签才会上架。npm 接受上传后会先扫描，工作流对每个包最多等待 30 分钟。若等待超时，可在该版本公开可查后选择 **Re-run failed jobs**，沿用原测试产物并跳过已发布且哈希相同的包。[npm 发布扫描说明](https://github.blog/changelog/2026-07-28-npm-publish-time-malware-scanning-and-dual-use-metadata/)
 
 npm 上的 `@teamsillybees/blip-win32-x64` 和 `@teamsillybees/blip` 各自授权 GitHub Actions。可信发布者的组织为 `TeamSillyBees`、仓库为 `Blip`、工作流文件名为 `publish.yml`，并启用 **Allow npm publish**。[npm 可信发布文档](https://docs.npmjs.com/trusted-publishers/)

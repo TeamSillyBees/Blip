@@ -7,6 +7,7 @@ import platforms from '../npm/blip/lib/platforms.cjs';
 import { runNpm } from './npm-helpers.mjs';
 
 const registry = 'https://registry.npmjs.org';
+const availabilityTimeoutMinutes = 30;
 const output = 'dist/npm';
 const mode = process.argv[2];
 assert.ok(process.argv.length === 3 && ['--dry-run', '--publish'].includes(mode), 'Use --dry-run or --publish.');
@@ -75,10 +76,15 @@ for (const { pkg, args } of pending) {
 if (live) {
   for (const { pkg, args } of pending) {
     await runNpm(args);
+    console.log(`npm accepted ${pkg.name}@${version}. Waiting for public availability.`);
+    const deadline = Date.now() + availabilityTimeoutMinutes * 60_000;
     let integrity = await publishedIntegrity(pkg.name);
-    for (let retry = 0; integrity === null && retry < 6; retry++) {
-      await delay(5000);
+    while (integrity === null && Date.now() < deadline) {
+      await delay(15_000);
       integrity = await publishedIntegrity(pkg.name);
+    }
+    if (integrity === null) {
+      throw new Error(`${pkg.name}@${version} is still unavailable ${availabilityTimeoutMinutes} minutes after npm accepted it. Re-run the failed job once the version is visible.`);
     }
     assert.equal(integrity, pkg.integrity, `Registry did not confirm the tested ${pkg.name}@${version} archive.`);
     console.log(`Published and verified ${pkg.name}@${version}.`);
