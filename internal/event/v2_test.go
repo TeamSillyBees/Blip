@@ -45,7 +45,7 @@ func TestV2HumanHandoffText(t *testing.T) {
 		reason, want string
 	}{{TurnCompleted, "", "下一步"}, {InputRequested, "", "Claude Code 回复"}, {ApprovalRequested, "", "Claude Code 中确认"}, {AttentionRequired, "error", "运行遇到问题"}} {
 		e := Event{SchemaVersion: 2, Agent: "claude-code", Kind: item.kind, Reason: item.reason, Project: "Blip", DeviceName: "workstation", OccurredAt: time.Now()}
-		if !strings.Contains(e.Text(), item.want) || !strings.Contains(e.Text(), "workstation") || !strings.Contains(e.Body(), "时间：") {
+		if !strings.Contains(e.Text(), item.want) || !strings.HasSuffix(e.Title(), " · workstation · Claude Code") || !strings.Contains(e.Body(), "时间：") {
 			t.Fatalf("missing handoff context: %s", e.Text())
 		}
 	}

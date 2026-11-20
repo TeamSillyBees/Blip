@@ -163,7 +163,7 @@ func (e Event) Title() string {
 	if e.DeviceName != "" {
 		title += " · " + LimitBytes(e.DeviceName, 128)
 	}
-	return title
+	return title + " · " + e.AgentName()
 }
 
 // Body contains the conversation title, local event time, and information needed

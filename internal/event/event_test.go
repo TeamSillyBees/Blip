@@ -20,9 +20,9 @@ func TestHumanNotificationFormats(t *testing.T) {
 		kind        Kind
 		title, body string
 	}{
-		{TurnCompleted, "完成 · Blip · 开发工作站", bodyPrefix + "\n\n" + lastReply},
-		{InputRequested, "需要输入 · Blip · 开发工作站", bodyPrefix + "\n\n请选择通知渠道\nA. 飞书：团队群\nB. Gotify：手机提醒\nC. Webhook\nD. 企业微信\n\n启用测试？\nA. 是\nB. 否"},
-		{ApprovalRequested, "需要输入 · Blip · 开发工作站", bodyPrefix + "\n\n请在 Codex 中确认审批。"},
+		{TurnCompleted, "完成 · Blip · 开发工作站 · Codex", bodyPrefix + "\n\n" + lastReply},
+		{InputRequested, "需要输入 · Blip · 开发工作站 · Codex", bodyPrefix + "\n\n请选择通知渠道\nA. 飞书：团队群\nB. Gotify：手机提醒\nC. Webhook\nD. 企业微信\n\n启用测试？\nA. 是\nB. 否"},
+		{ApprovalRequested, "需要输入 · Blip · 开发工作站 · Codex", bodyPrefix + "\n\n请在 Codex 中确认审批。"},
 	} {
 		t.Run(string(entry.kind), func(t *testing.T) {
 			e := Event{Kind: entry.kind, Project: "Blip", SessionTitle: "  优化通知展示  ", DeviceName: "开发工作站", SessionID: "private-session", TurnID: "private-turn", Detail: lastReply, OccurredAt: occurredAt, Questions: questions}
@@ -59,13 +59,13 @@ func TestCompletionDetailsAreOptionalAndBounded(t *testing.T) {
 
 func TestNotificationTitleRemainsBoundedUTF8(t *testing.T) {
 	e := Event{Kind: TurnCompleted, Project: strings.Repeat("项目🙂", 100), SessionTitle: "会话标题"}
-	if title := e.Title(); !utf8.ValidString(title) || len(title) > len("完成 · ")+120 || !strings.HasSuffix(title, "…") {
+	if title := e.Title(); !utf8.ValidString(title) || len(title) > len("完成 · ")+120+len(" · Codex") || !strings.HasSuffix(title, "… · Codex") {
 		t.Fatalf("long Unicode project broke title bound: %q", title)
 	}
 	e.DeviceName = strings.Repeat("设备🙂", 100)
 	title := e.Title()
 	parts := strings.Split(title, " · ")
-	if !utf8.ValidString(title) || len(parts) != 3 || len(parts[1]) > 120 || len(parts[2]) > 128 || !strings.HasSuffix(parts[1], "…") || !strings.HasSuffix(parts[2], "…") {
+	if !utf8.ValidString(title) || len(parts) != 4 || len(parts[1]) > 120 || len(parts[2]) > 128 || !strings.HasSuffix(parts[1], "…") || !strings.HasSuffix(parts[2], "…") || parts[3] != "Codex" {
 		t.Fatalf("long Unicode project or device broke title bound: %q", title)
 	}
 }
@@ -98,7 +98,7 @@ func TestLegacyEventsWithoutSessionTitleRemainValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantBody := "未命名对话\n时间：" + e.OccurredAt.Local().Format("2006-01-02 15:04:05 -07:00")
-	if e.Title() != "需要输入 · project" || e.Body() != wantBody {
+	if e.Title() != "需要输入 · project · Codex" || e.Body() != wantBody {
 		t.Fatal("legacy notification did not use the conversation fallback")
 	}
 	data, err := json.Marshal(e)

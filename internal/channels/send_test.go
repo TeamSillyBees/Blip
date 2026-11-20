@@ -27,9 +27,9 @@ func TestAllEventKindsReachAllChannelProtocols(t *testing.T) {
 				notification := sample(kind)
 				// Delivery happens later; display the event's time, not the signing time.
 				notification.OccurredAt = time.Unix(1599356873, 0).UTC()
-				wantTitle := "需要输入 · 中文项目 · 开发工作站🙂"
+				wantTitle := "需要输入 · 中文项目 · 开发工作站🙂 · Codex"
 				if kind == event.TurnCompleted {
-					wantTitle = "完成 · 中文项目 · 开发工作站🙂"
+					wantTitle = "完成 · 中文项目 · 开发工作站🙂 · Codex"
 				}
 				bodyPrefix := "实现新的通知模板\n时间：" + notification.OccurredAt.Local().Format("2006-01-02 15:04:05 -07:00")
 				wantBody := map[event.Kind]string{
