@@ -12,6 +12,7 @@ import (
 	"github.com/TeamSillyBees/Blip/internal/codex"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/event"
+	"github.com/TeamSillyBees/Blip/internal/platform"
 )
 
 type codexAdapter struct {
@@ -151,15 +152,17 @@ func (a *codexAdapter) SessionTitle(ctx context.Context, id string) string {
 	return codex.SessionTitle(ctx, a.source.Home, id)
 }
 func (a *codexAdapter) Install(ctx context.Context, executable string) error {
-	id := a.source.ID
-	if id == config.DefaultSourceID {
-		id = ""
-	}
-	return codex.InstallSourceVersion(ctx, a.config, executable, id, a.source.EventVersion)
+	return codex.InstallSourceVersion(ctx, a.config, executable, a.source.ID, a.source.EventVersion)
 }
-func (a *codexAdapter) Uninstall(ctx context.Context) error { return codex.Uninstall(ctx, a.config) }
+func (a *codexAdapter) Uninstall(ctx context.Context) error {
+	executable, err := platform.ClientExecutable()
+	if err != nil {
+		return err
+	}
+	return codex.Uninstall(ctx, a.config, executable, a.source.ID)
+}
 func (a *codexAdapter) InstallationStatus() string {
-	return codex.InstallationStatus(a.config, a.source.EventVersion)
+	return codex.InstallationStatus(a.config, a.source.ID, a.source.EventVersion)
 }
 func (a *codexAdapter) ReadPaths() []ReadPath {
 	return []ReadPath{{Path: filepath.Join(a.source.Home, "sessions"), Directory: true}, {Path: filepath.Join(a.source.Home, "session_index.jsonl"), Optional: true}}

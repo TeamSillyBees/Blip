@@ -23,6 +23,7 @@ function fixture(platform = 'win32') {
     dependencies: {
       process: runtime,
       resolve: () => '/a directory with spaces/blip',
+      synchronize: () => '/fixed directory/blip.exe',
       spawn: (...args) => { calls.push(args); return child; },
     },
   };
@@ -72,7 +73,7 @@ test('passes arguments literally and inherits all terminal handles', () => {
   const state = fixture();
   const args = ['--config', 'a path with spaces/config.json', 'configure', '$HOME', ';echo nope'];
   assert.equal(run(args, state.dependencies), state.child);
-  assert.deepEqual(state.calls, [['/a directory with spaces/blip', args, { stdio: 'inherit' }]]);
+  assert.deepEqual(state.calls, [['/fixed directory/blip.exe', args, { stdio: 'inherit' }]]);
   state.child.emit('exit', 17, null);
   assert.equal(state.runtime.exitCode, 17);
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) assert.equal(state.runtime.listenerCount(signal), 0);

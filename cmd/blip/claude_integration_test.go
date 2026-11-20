@@ -43,6 +43,7 @@ func TestClaudeNativeHooks(t *testing.T) {
 	if err := store.WriteJSON(path, c); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	install := exec.Command(binary, "--config", path, "install", "claude-code", "--source", "claude-test", "--register-only")
 	if out, err := install.CombinedOutput(); err != nil {
 		t.Fatalf("install: %s %v", out, err)
@@ -224,6 +225,7 @@ func TestClaudeExecFormCLI(t *testing.T) {
 	if err := store.WriteJSON(path, c); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	if out, err := exec.Command(binary, "--config", path, "install", "claude-code", "--source", "claude", "--register-only").CombinedOutput(); err != nil {
 		t.Fatalf("install: %s %v", out, err)
 	}

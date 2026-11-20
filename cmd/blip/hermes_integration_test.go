@@ -31,6 +31,7 @@ func TestHermesNativeShellHooks(t *testing.T) {
 	if err := store.WriteJSON(path, c); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	if out, err := exec.Command(binary, "--config", path, "install", "hermes", "--source", "hermes-test", "--register-only").CombinedOutput(); err != nil {
 		t.Fatalf("install: %s %v", out, err)
 	}

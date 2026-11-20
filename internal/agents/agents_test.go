@@ -177,7 +177,11 @@ func TestInstallationCanBeRemovedAfterSourceDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	installer := a.(Installer)
-	if err = installer.Install(context.Background(), filepath.Join(t.TempDir(), "blip.exe")); err != nil {
+	executable := filepath.Join(t.TempDir(), "blip.exe")
+	if err := os.WriteFile(executable, []byte("native target"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = installer.Install(context.Background(), executable); err != nil {
 		t.Fatal(err)
 	}
 	if installer.InstallationStatus() != "configured_unverified" {

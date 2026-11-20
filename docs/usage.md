@@ -58,13 +58,13 @@ URL 明文显示并可直接编辑；Token、签名密钥和请求头值使用�
 
 未启用飞书签名时，删去该目的地的 `secret` 字段，或将它设为 `""`。安装命令会增量写入 Codex `hooks.json`，保留其他 hook 并备份原文件。随后在 **Codex 中审阅并信任新 hook**，必要时重开既有会话。当前 Codex 默认启用 hooks；如果配置显式关闭，安装命令会提示先在 Codex 中启用，不会改写 `config.toml` 或信任记录。
 
-## Codex 固定 Hook 入口
+## Codex Hook 注册与升级
 
-Codex hook 通过 home 下的固定入口挂载：Windows 为 `<codex_home>/.blip-hooks/<安装标识>/hook.cmd`，Linux/macOS 为 `hook.sh`。旁边的 `run.cmd` / `run.sh` 保存当前 Blip 程序、配置路径和来源参数；切换 Node/npm 安装目录后，运行 `blip install codex`（其他来源加 `--source ID`），或在向导选择“保存并启动”，即可更新转发目标。普通升级保持入口内容、注册命令和 hook 顺序不变。
+每台使用 Codex 的机器首次升级到固定路径版时，在当前账户的管理员终端运行一次 `blip install codex`，再在 Codex 中审阅并信任新回调。CLI 中输入 `/hooks`，桌面版可打开 Hooks 设置。Codex 按具体回调定义记录信任。[Codex 官方说明](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
 
-从旧版直接调用 `blip.exe` 的注册方式迁移时，需要审阅一次新入口；后续若只变更程序路径，不会因此改变 hook 定义。事件、匹配器或超时等定义发生变化时，仍按 [Codex 的信任规则](https://learn.chatgpt.com/docs/hooks)重新审阅。安装记录兼容旧格式；卸载只清理本配置拥有的 hook 和入口文件。
+安装命令先准备好 `%LOCALAPPDATA%\Programs\Blip\blip.exe`，再为该来源使用的每个事件登记一条直接调用程序的命令。默认参数为 `hook --source codex-default`。命名来源使用自己的 ID，自定义配置会传入配置文件路径。Blip 重建本来源的旧回调并保留其他工具及其他 Blip 配置的注册。
 
-请将程序放在固定位置后再执行安装；移动程序或更换配置路径后，重新安装 hook。
+重复安装会跳过已正确的注册。以后普通 npm 升级更新固定位置的程序，切换 Node 版本也会沿用已安装的较新版本。`blip uninstall codex` 仅解除本配置的 Codex 接入，保留固定程序和其他助手的接入。Windows 系统服务另有受保护的程序副本。[Windows 服务指南](windows-service.md#账户目录和升级)
 
 ## 后台进程与开机自启
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
+	"github.com/TeamSillyBees/Blip/internal/platform"
 	"github.com/TeamSillyBees/Blip/internal/service"
 	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
@@ -74,6 +75,10 @@ func withInstallLock(ctx context.Context, path string, apply func(service.Status
 }
 
 func (target installTarget) install(ctx context.Context, path, id, home string, registerOnly bool, out io.Writer) error {
+	exe, err := platform.EnsureClientExecutable(ctx, version, "")
+	if err != nil {
+		return err
+	}
 	return withInstallLock(ctx, path, func(status service.Status) error {
 		doc, err := config.OpenDocument(path)
 		if err != nil {
@@ -118,10 +123,6 @@ func (target installTarget) install(ctx context.Context, path, id, home string, 
 			if err != nil {
 				return err
 			}
-		}
-		exe, err := os.Executable()
-		if err != nil {
-			return err
 		}
 		if err := bindInstallSource(ctx, c, source); err != nil {
 			return err

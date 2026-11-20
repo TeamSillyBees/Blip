@@ -15,6 +15,7 @@ import (
 )
 
 func TestInstallDiscoversHarnessesAndRegistersCustomHomes(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	dir := t.TempDir()
 	t.Setenv("USERPROFILE", dir)
 	t.Setenv("HOME", dir)
@@ -60,8 +61,15 @@ func TestInstallDiscoversHarnessesAndRegistersCustomHomes(t *testing.T) {
 		if !ok || !s.Enabled || s.Home != test.home {
 			t.Fatalf("incorrect %s source: %+v", test.command, s)
 		}
-		if _, err := os.Stat(filepath.Join(test.home, test.file)); err != nil {
+		registration, err := os.ReadFile(filepath.Join(test.home, test.file))
+		if err != nil {
 			t.Fatalf("%s registration missing: %v", test.command, err)
+		}
+		if runtime.GOOS == "windows" {
+			fixed := filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Blip", "blip.exe")
+			if !strings.Contains(strings.ReplaceAll(string(registration), `\\`, `\`), fixed) {
+				t.Fatalf("%s did not register the fixed executable", test.command)
+			}
 		}
 	}
 	before, err := os.ReadFile(path)
@@ -78,6 +86,7 @@ func TestInstallDiscoversHarnessesAndRegistersCustomHomes(t *testing.T) {
 }
 
 func TestFirstInstallSelectsOnlyTheRequestedAntigravityClient(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	dir := t.TempDir()
 	t.Setenv("USERPROFILE", dir)
 	t.Setenv("HOME", dir)
@@ -109,6 +118,7 @@ func TestInstallCreatesAndControlsWindowsService(t *testing.T) {
 	if err := store.WriteJSON(path, c); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(dir, "claude"))
 	call := func(args ...string) {
 		t.Helper()

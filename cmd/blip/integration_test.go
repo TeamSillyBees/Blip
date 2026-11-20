@@ -32,7 +32,7 @@ func TestCLIEndToEnd(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %s %v", output, err)
 	}
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config %PATH% ! ^.json")
 	call := func(args ...string) []byte {
 		t.Helper()
 		command := exec.Command(binary, append([]string{"--config", path}, args...)...)
@@ -84,6 +84,7 @@ func TestCLIEndToEnd(t *testing.T) {
 	if err := os.WriteFile(rollout, []byte(metadata("root", "user")+complete("historical")), 0600); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	call("install", "codex", "--register-only")
 	t.Cleanup(func() { command := exec.Command(binary, "--config", path, "stop"); _, _ = command.CombinedOutput() })
 	call("start")

@@ -1,9 +1,12 @@
 {
   "name": "@teamsillybees/blip",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Local agent handoff notifications with interactive configuration",
   "bin": {
     "blip": "bin/blip.cjs"
+  },
+  "scripts": {
+    "postinstall": "node lib/postinstall.cjs"
   },
   "files": [
     "bin",
@@ -31,6 +34,6 @@
     "access": "public"
   },
   "optionalDependencies": {
-    "@teamsillybees/blip-win32-x64": "0.3.1"
+    "@teamsillybees/blip-win32-x64": "0.4.0"
   }
 }

@@ -52,6 +52,7 @@ func TestScriptTestKeepsOfflineQueueOnlyContract(t *testing.T) {
 }
 
 func TestBareCodexCommandsKeepDefaultIdentityAfterSourceRemoval(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	home := filepath.Join(dir, "default home")

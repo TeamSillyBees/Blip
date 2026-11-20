@@ -52,6 +52,7 @@ async function main() {
   const staging = await mkdtemp(join(output, '.staging-'));
   try {
     const manifest = { version: wrapper.version, wrapper: null, platforms: [] };
+    const nativeHashes = {};
     for (const target of targets) {
       process.stdout.write(`Building ${target.id}...\n`);
       const directory = join(staging, target.id);
@@ -62,6 +63,7 @@ async function main() {
         env: { ...process.env, CGO_ENABLED: '0', GOOS: target.goos, GOARCH: target.goarch },
       });
       await chmod(binary, 0o755);
+      nativeHashes[target.id] = createHash('sha256').update(await readFile(binary)).digest('hex');
       await writeFile(join(directory, 'package.json'), `${JSON.stringify({
         name: target.packageName,
         version: wrapper.version,
@@ -78,6 +80,8 @@ async function main() {
     }
     const wrapperDirectory = join(staging, 'wrapper');
     await cp(wrapperSource, wrapperDirectory, { recursive: true });
+    // Bind each executable to the wrapper release as well as npm's archive integrity.
+    await writeFile(join(wrapperDirectory, 'package.json'), `${JSON.stringify({ ...wrapper, blipNativeSha256: nativeHashes }, null, 2)}\n`);
     await chmod(join(wrapperDirectory, 'bin', 'blip.cjs'), 0o755);
     await addNotices(wrapperDirectory);
     manifest.wrapper = await pack(wrapperDirectory, 'blip.cjs');

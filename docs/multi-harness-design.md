@@ -32,9 +32,7 @@ Blip 的目标是在该由用户接手时及时提醒，减少 harness 停下来
 
 Orca 的 [provider 分派](https://github.com/stablyai/orca/blob/26741256dcccecac4007f64476a17825fdd3858b/src/shared/agent-hook-listener/provider-dispatch.ts) 表明，Claude 风格的配置结构并不构成统一事件语义。其 [事件归一化](https://github.com/stablyai/orca/blob/26741256dcccecac4007f64476a17825fdd3858b/src/shared/agent-hook-listener/normalization/normalize-hook-payload.ts) 还处理会话归属、子任务和历史事件；Blip 提取识别用户接手机会所需的部分，不要求不同 harness 提供同名 hook。
 
-独立 `.cmd` 是一种运行环境适配方式，不是多 harness 的共同协议。Codex 接入参考 Orca 的固定脚本挂载方式，在配置的 Codex home 下注册 `.blip-hooks/<安装标识>/hook.cmd` 或 `hook.sh`；稳定入口加载相邻的 `run.cmd` / `run.sh`，再调用原生 Go 程序。安装标识来自该来源的状态目录，避免多个配置或来源共享可变目标。升级只更新转发目标，注册定义与入口内容保持不变；旧直接命令按已有安装记录迁移，首次迁移仍由用户审阅新定义。其他 harness 继续使用其已经验证的 argv、shell 或插件协议。
-
-Antigravity 和 agy 通过共享的用户级 `hooks.json` 注册原生回调，按客户端报告的会话目录区分来源。
+Windows 上所有助手引用当前用户的 `%LOCALAPPDATA%\Programs\Blip\blip.exe`。Codex 在其 home 的 `hooks.json` 中按事件直接注册 `blip.exe hook --source ID`，自定义配置另外传入配置路径。首次升级需要重新安装并在 Codex 中信任新回调。Claude Code 使用其 command 与 args 字段，Hermes 使用原生 shell hook，DSH 通过 Cordis 插件调用固定程序。Antigravity 和 agy 通过共享的用户级 `hooks.json` 注册原生回调，按客户端报告的会话目录区分来源。
 
 ## 数据流与模块边界
 

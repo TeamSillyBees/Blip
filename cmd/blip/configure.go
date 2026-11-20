@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
+	"github.com/TeamSillyBees/Blip/internal/platform"
 	"github.com/TeamSillyBees/Blip/internal/service"
 	"github.com/TeamSillyBees/Blip/internal/setup"
 )
@@ -72,7 +72,7 @@ func applyConfiguration(ctx context.Context, path string, output io.Writer) erro
 		if len(c.Enabled()) == 0 {
 			return errors.New("请先启用至少一个通知目的地")
 		}
-		exe, err := os.Executable()
+		exe, err := platform.EnsureClientExecutable(ctx, version, "")
 		if err != nil {
 			return err
 		}

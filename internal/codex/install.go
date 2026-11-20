@@ -3,17 +3,18 @@ package codex
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/TeamSillyBees/Blip/internal/config"
+	"github.com/TeamSillyBees/Blip/internal/platform"
 	"github.com/TeamSillyBees/Blip/internal/store"
 	"github.com/gofrs/flock"
 	"github.com/pelletier/go-toml/v2"
@@ -22,30 +23,17 @@ import (
 const hookMarker = "Blip: capture notification (v1)"
 
 type installation struct {
-	CodexHome string          `json:"codex_home"`
-	Commands  []string        `json:"commands"`
-	Launcher  *launcherRecord `json:"launcher,omitempty"`
+	CodexHome  string   `json:"codex_home"`
+	Commands   []string `json:"commands"`
+	Executable string   `json:"executable,omitempty"`
 }
 
-// Commands formats the legacy direct invocation. Install now registers a
-// stable launcher; this format remains useful for compatibility and migration.
-func Commands(executable, configPath string) (string, string, error) {
-	for _, value := range []string{executable, configPath} {
-		if strings.ContainsAny(value, "\x00\r\n\"%!^") {
-			return "", "", fmt.Errorf("hook paths cannot contain quotes, percent signs, exclamation marks, carets or control characters")
-		}
-	}
-	posix := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
-	windows := func(value string) string { return "\"" + value + "\"" }
-	return posix(executable) + " --config " + posix(configPath) + " hook", windows(executable) + " --config " + windows(configPath) + " hook", nil
-}
+func posixQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
 
 func Install(ctx context.Context, c config.Config, executable string) error {
-	return InstallSource(ctx, c, executable, "")
+	return InstallSource(ctx, c, executable, config.DefaultSourceID)
 }
 
-// InstallSource keeps the legacy default source implicit; new sources carry an
-// explicit ID in the launcher target and use the adapter's state directory.
 func InstallSource(ctx context.Context, c config.Config, executable, sourceID string) error {
 	return InstallSourceVersion(ctx, c, executable, sourceID, 1)
 }
@@ -54,14 +42,16 @@ func InstallSourceVersion(ctx context.Context, c config.Config, executable, sour
 	if err := hooksEnabled(c.CodexHome); err != nil {
 		return err
 	}
-	launcher, err := newHookLauncher(c, executable, sourceID, runtime.GOOS == "windows")
+	executable, err := filepath.Abs(executable)
 	if err != nil {
 		return err
 	}
-	return editHooksVersion(ctx, c, launcher.commands, true, eventVersion, &launcher)
+	return editHooks(ctx, c, executable, sourceID, eventVersion, true)
 }
 
-func Uninstall(ctx context.Context, c config.Config) error { return editHooks(ctx, c, nil, false) }
+func Uninstall(ctx context.Context, c config.Config, executable, sourceID string) error {
+	return editHooks(ctx, c, executable, sourceID, 0, false)
+}
 
 func hooksEnabled(home string) error {
 	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
@@ -83,11 +73,11 @@ func hooksEnabled(home string) error {
 	return nil
 }
 
-func editHooks(ctx context.Context, c config.Config, commands []string, install bool) error {
-	return editHooksVersion(ctx, c, commands, install, 1, nil)
-}
-
-func editHooksVersion(ctx context.Context, c config.Config, commands []string, install bool, eventVersion int, launcher *hookLauncher) error {
+func editHooks(ctx context.Context, c config.Config, executable, sourceID string, eventVersion int, install bool) error {
+	command, err := platform.HookCommand(executable, c.Path, sourceID)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(c.CodexHome, 0700); err != nil {
 		return err
 	}
@@ -108,19 +98,7 @@ func editHooksVersion(ctx context.Context, c config.Config, commands []string, i
 	if previous.CodexHome != "" && previous.CodexHome != c.CodexHome {
 		return fmt.Errorf("configuration now points to another Codex home; uninstall using the original configuration first")
 	}
-	if err = checkLauncher(c, previous.Launcher, true); err != nil {
-		return err
-	}
-	journalLauncher := mergeLauncher(previous.Launcher, launcher)
-	if err = checkLauncher(c, journalLauncher, true); err != nil {
-		return err
-	}
-	managed := map[string]bool{}
-	for _, command := range append(append([]string{}, previous.Commands...), commands...) {
-		if command != "" {
-			managed[command] = true
-		}
-	}
+	owned := ownedHooks(c, sourceID, command, previous.Commands)
 	path := filepath.Join(c.CodexHome, "hooks.json")
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -143,14 +121,14 @@ func editHooksVersion(ctx context.Context, c config.Config, commands []string, i
 	}
 	desired := map[string]map[string]any{}
 	if install {
-		desired = hookGroups(commands, eventVersion)
+		desired = hookGroups(command, eventVersion)
 	}
 	// Keep the original bytes and group positions when registration is already
 	// correct. Reinstalling one configuration must not reorder it after others.
-	registrationMatches := install && matchesRegistration(hooks, managed, desired)
+	registrationMatches := matchesRegistration(hooks, owned, desired)
 	if !registrationMatches {
 		for name, groups := range hooks {
-			cleaned, cleanErr := stripManaged(groups, managed)
+			cleaned, cleanErr := stripManaged(groups, owned)
 			if cleanErr != nil {
 				return cleanErr
 			}
@@ -184,22 +162,6 @@ func editHooksVersion(ctx context.Context, c config.Config, commands []string, i
 			return fmt.Errorf("back up Codex hooks: %w", err)
 		}
 	}
-	if install {
-		owned := []string{}
-		for command := range managed {
-			owned = append(owned, command)
-		}
-		slices.Sort(owned)
-		// Keep old and new ownership through a failed update, so uninstall can recover either state.
-		if err = store.WriteJSON(manifestPath, installation{CodexHome: c.CodexHome, Commands: owned, Launcher: journalLauncher}); err != nil {
-			return err
-		}
-		if launcher != nil {
-			if err = launcher.write(); err != nil {
-				return err
-			}
-		}
-	}
 	if changed {
 		current, readErr := os.ReadFile(path)
 		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
@@ -216,36 +178,27 @@ func editHooksVersion(ctx context.Context, c config.Config, commands []string, i
 		}
 	}
 	if !install {
-		if err = removeLauncher(c, previous.Launcher); err != nil {
-			return err
-		}
 		if err = os.Remove(manifestPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-	} else {
-		current := []string{commands[0]}
-		if commands[1] != "" && commands[1] != commands[0] {
-			current = append(current, commands[1])
-		}
-		var record *launcherRecord
-		if launcher != nil {
-			record = &launcher.record
-		}
-		return store.WriteJSON(manifestPath, installation{CodexHome: c.CodexHome, Commands: current, Launcher: record})
+	} else if previous.Executable != executable || previous.CodexHome != c.CodexHome || len(previous.Commands) != 1 || previous.Commands[0] != command {
+		// Publishing hooks first is retryable: the new command is known even
+		// without a manifest, and the old record identifies previous entries.
+		return store.WriteJSON(manifestPath, installation{CodexHome: c.CodexHome, Commands: []string{command}, Executable: executable})
 	}
 	return nil
 }
 
-func hookGroups(commands []string, eventVersion int) map[string]map[string]any {
+func hookGroups(command string, eventVersion int) map[string]map[string]any {
 	names := []string{"PreToolUse", "PermissionRequest"}
 	if eventVersion == 2 {
 		names = append(names, "Stop", "UserPromptSubmit", "Interrupt", "PostToolUse")
 	}
 	groups := map[string]map[string]any{}
 	for _, name := range names {
-		handler := map[string]any{"type": "command", "command": commands[0], "timeout": 10, "statusMessage": hookMarker}
-		if commands[1] != "" {
-			handler["commandWindows"] = commands[1]
+		handler := map[string]any{"type": "command", "command": command, "timeout": 10, "statusMessage": hookMarker}
+		if runtime.GOOS == "windows" {
+			handler["commandWindows"] = command
 		}
 		group := map[string]any{"hooks": []any{handler}}
 		if name == "PreToolUse" && eventVersion != 2 {
@@ -259,7 +212,52 @@ func hookGroups(commands []string, eventVersion int) map[string]map[string]any {
 	return groups
 }
 
-func matchesRegistration(hooks map[string]any, managed map[string]bool, desired map[string]map[string]any) bool {
+func ownedHooks(c config.Config, sourceID, command string, previous []string) func(map[string]any) bool {
+	known := map[string]bool{command: true}
+	for _, old := range previous {
+		if old != "" {
+			known[old] = true
+		}
+	}
+	// Reconstruct the previous registration even if its manifest or scripts
+	// are gone. The state-directory identity separates configs sharing a home.
+	state := filepath.Clean(c.StateDir)
+	if runtime.GOOS == "windows" {
+		state = strings.ToLower(state)
+	}
+	sum := sha256.Sum256([]byte(state))
+	dir := filepath.Join(c.CodexHome, ".blip-hooks", fmt.Sprintf("%x", sum[:16]))
+	known[`"`+filepath.ToSlash(filepath.Join(dir, "hook.cmd"))+`"`] = true
+	known[posixQuote(filepath.Join(dir, "hook.sh"))] = true
+	// Pre-launcher releases registered the native binary directly with the
+	// config first. Match its basename, config and source, never a marker alone.
+	suffix := ""
+	if sourceID != config.DefaultSourceID {
+		suffix = " --source " + sourceID
+	}
+	legacyWindows := `" --config "` + c.Path + `" hook` + suffix
+	legacyPosix := "' --config " + posixQuote(c.Path) + " hook" + suffix
+	matches := func(line string) bool {
+		if known[line] {
+			return true
+		}
+		if exe, ok := strings.CutSuffix(line, legacyWindows); ok && strings.HasPrefix(exe, `"`) {
+			return strings.EqualFold(filepath.Base(exe[1:]), "blip.exe")
+		}
+		if exe, ok := strings.CutSuffix(line, legacyPosix); ok && strings.HasPrefix(exe, "'") {
+			base := filepath.Base(exe[1:])
+			return base == "blip" || base == "blip.exe"
+		}
+		return false
+	}
+	return func(handler map[string]any) bool {
+		cmd, _ := handler["command"].(string)
+		win, _ := handler["commandWindows"].(string)
+		return handler["type"] == "command" && handler["statusMessage"] == hookMarker && (matches(cmd) || matches(win))
+	}
+}
+
+func matchesRegistration(hooks map[string]any, owned func(map[string]any) bool, desired map[string]map[string]any) bool {
 	seen := map[string]bool{}
 	for name, value := range hooks {
 		groups, ok := value.([]any)
@@ -280,9 +278,7 @@ func matchesRegistration(hooks map[string]any, managed map[string]bool, desired 
 				if !ok {
 					return false
 				}
-				command, _ := handler["command"].(string)
-				windows, _ := handler["commandWindows"].(string)
-				if handler["statusMessage"] != hookMarker || (!managed[command] && !managed[windows]) {
+				if !owned(handler) {
 					continue
 				}
 				candidate := map[string]any{}
@@ -302,7 +298,7 @@ func matchesRegistration(hooks map[string]any, managed map[string]bool, desired 
 	return len(seen) == len(desired)
 }
 
-func stripManaged(value any, commands map[string]bool) ([]any, error) {
+func stripManaged(value any, owned func(map[string]any) bool) ([]any, error) {
 	groups, ok := value.([]any)
 	if !ok {
 		return nil, fmt.Errorf("Codex hook event entries must be arrays")
@@ -324,9 +320,7 @@ func stripManaged(value any, commands map[string]bool) ([]any, error) {
 			if !ok {
 				return nil, fmt.Errorf("invalid Codex hook handler")
 			}
-			command, _ := object["command"].(string)
-			windows, _ := object["commandWindows"].(string)
-			if object["statusMessage"] == hookMarker && (commands[command] || commands[windows]) {
+			if owned(object) {
 				removed = true
 				continue
 			}

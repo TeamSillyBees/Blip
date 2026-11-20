@@ -7,12 +7,13 @@ import (
 	"path/filepath"
 
 	"github.com/TeamSillyBees/Blip/internal/config"
+	"github.com/TeamSillyBees/Blip/internal/platform"
 	"github.com/TeamSillyBees/Blip/internal/store"
 )
 
-// InstallationStatus checks local configuration and launcher integrity only;
-// Codex remains responsible for hook trust and execution.
-func InstallationStatus(c config.Config, eventVersion int) string {
+// InstallationStatus verifies the native target and the complete event definitions.
+// Codex owns the separate decision to trust and execute them.
+func InstallationStatus(c config.Config, sourceID string, eventVersion int) string {
 	var manifest installation
 	err := store.ReadJSON(filepath.Join(c.StateDir, "installation.json"), &manifest)
 	if errors.Is(err, os.ErrNotExist) {
@@ -21,7 +22,10 @@ func InstallationStatus(c config.Config, eventVersion int) string {
 	if err != nil || len(manifest.Commands) == 0 || manifest.CodexHome != c.CodexHome {
 		return "invalid_manifest"
 	}
-	if err = checkLauncher(c, manifest.Launcher, false); err != nil {
+	if manifest.Executable == "" {
+		return "missing_configuration" // a pre-fixed-path registration needs reinstall
+	}
+	if info, err := os.Stat(manifest.Executable); err != nil || !info.Mode().IsRegular() {
 		if errors.Is(err, os.ErrNotExist) {
 			return "missing_configuration"
 		}
@@ -38,37 +42,17 @@ func InstallationStatus(c config.Config, eventVersion int) string {
 		return "missing_configuration"
 	}
 	var root struct {
-		Hooks map[string][]struct {
-			Hooks []struct {
-				Command string `json:"command"`
-				Windows string `json:"commandWindows"`
-				Marker  string `json:"statusMessage"`
-			} `json:"hooks"`
-		} `json:"hooks"`
+		Hooks map[string]any `json:"hooks"`
 	}
 	if json.Unmarshal(data, &root) != nil {
 		return "invalid_configuration"
 	}
-	owned := map[string]bool{}
-	for _, command := range manifest.Commands {
-		owned[command] = true
+	command, err := platform.HookCommand(manifest.Executable, c.Path, sourceID)
+	if err != nil || len(manifest.Commands) != 1 || manifest.Commands[0] != command {
+		return "invalid_manifest"
 	}
-	names := []string{"PreToolUse", "PermissionRequest"}
-	if eventVersion == 2 {
-		names = append(names, "Stop", "Interrupt", "UserPromptSubmit", "PostToolUse")
-	}
-	for _, name := range names {
-		found := false
-		for _, group := range root.Hooks[name] {
-			for _, hook := range group.Hooks {
-				if hook.Marker == hookMarker && owned[hook.Command] && (hook.Windows == "" || owned[hook.Windows]) {
-					found = true
-				}
-			}
-		}
-		if !found {
-			return "missing_configuration"
-		}
+	if !matchesRegistration(root.Hooks, ownedHooks(c, sourceID, command, nil), hookGroups(command, eventVersion)) {
+		return "missing_configuration"
 	}
 	return "configured_unverified"
 }

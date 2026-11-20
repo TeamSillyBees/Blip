@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
@@ -47,10 +48,11 @@ export async function smokeInstall() {
       '--global', '--registry', 'http://127.0.0.1:9/',
       '--userconfig', userConfig, '--globalconfig', globalConfig,
       '--cache', join(temp, 'cache'), '--no-audit', '--no-fund',
-      '--ignore-scripts', '--offline', '--fetch-retries=0', '--fetch-timeout=5000',
+      '--offline', '--fetch-retries=0', '--fetch-timeout=5000',
     ];
     const prefix = join(temp, 'installed');
-    await runNpm(['install', ...common, '--prefix', prefix, '--include=optional', join(output, manifest.wrapper.file), join(output, native.file)], { cwd: temp, env });
+    const archives = [join(output, manifest.wrapper.file), join(output, native.file)];
+    await runNpm(['install', ...common, '--ignore-scripts', '--prefix', prefix, '--include=optional', ...archives], { cwd: temp, env });
     const moduleRoot = process.platform === 'win32' ? join(prefix, 'node_modules') : join(prefix, 'lib', 'node_modules');
     const wrapperDirectory = join(moduleRoot, '@teamsillybees', 'blip');
     const shim = join(wrapperDirectory, 'bin', 'blip.cjs');
@@ -59,10 +61,16 @@ export async function smokeInstall() {
     assert.ok(binary.startsWith(prefix + sep), 'The binary must resolve inside the temporary installation prefix.');
     const nativeManifest = installedRequire(`${target.packageName}/package.json`);
     assert.equal(nativeManifest.version, manifest.version);
+    const fixed = join(env.LOCALAPPDATA, 'Programs', 'Blip', 'blip.exe');
+    const digest = async (file) => createHash('sha256').update(await readFile(file)).digest('hex');
+    const expected = installedRequire('./package.json').blipNativeSha256[target.id];
+    assert.equal(await digest(binary), expected);
+    await assert.rejects(access(fixed), { code: 'ENOENT' });
     const invoke = (args) => run(process.execPath, [shim, ...args], { cwd: temp, env });
     const version = await invoke(['version']);
     assert.equal(version.code, 0, version.stderr);
     assert.equal(version.stdout.trim(), manifest.version);
+    assert.equal(await digest(fixed), expected, 'first use must synchronize even with --ignore-scripts');
     const help = await invoke(['--help']);
     assert.equal(help.code, 0, help.stderr);
     assert.match(help.stdout, /configure/);
@@ -85,14 +93,23 @@ export async function smokeInstall() {
     assert.equal(linked.stdout.trim(), manifest.version);
 
     const missingPrefix = join(temp, 'without-optional');
-    await runNpm(['install', ...common, '--prefix', missingPrefix, '--omit=optional', join(output, manifest.wrapper.file)], { cwd: temp, env });
+    await runNpm(['install', ...common, '--ignore-scripts', '--prefix', missingPrefix, '--omit=optional', join(output, manifest.wrapper.file)], { cwd: temp, env });
     const missingModules = process.platform === 'win32' ? join(missingPrefix, 'node_modules') : join(missingPrefix, 'lib', 'node_modules');
     const missing = await run(process.execPath, [join(missingModules, '@teamsillybees', 'blip', 'bin', 'blip.cjs'), 'version'], { cwd: temp, env });
     assert.equal(missing.code, 1);
     assert.match(missing.stderr, /native package.*is missing/);
     assert.match(missing.stderr, /--include=optional/);
     assert.doesNotMatch(missing.stderr, /MODULE_NOT_FOUND|Require stack:/);
-    return { version: manifest.version, platform: target.id, checks: ['offline local tarball install', 'native resolution', 'version', 'help', 'init with spaces', 'nonzero exit', 'npm bin entry', 'missing optional dependency'] };
+    // Test postinstall independently of the lazy launcher, under another profile.
+    const eagerEnv = { ...env, LOCALAPPDATA: join(temp, 'postinstall profile') };
+    await runNpm(['install', ...common, '--foreground-scripts', '--prefix', join(temp, 'other node prefix'), '--include=optional', ...archives], { cwd: temp, env: eagerEnv });
+    assert.equal(await digest(join(eagerEnv.LOCALAPPDATA, 'Programs', 'Blip', 'blip.exe')), expected, 'global install must synchronize before first launch');
+    await writeFile(binary, 'corrupted package executable');
+    const corrupt = await invoke(['version']);
+    assert.notEqual(corrupt.code, 0);
+    assert.match(corrupt.stderr, /SHA-256/);
+    assert.equal(await digest(fixed), expected, 'verification failure replaced the working executable');
+    return { version: manifest.version, platform: target.id, checks: ['global postinstall', 'first use with --ignore-scripts', 'bundle integrity', 'native resolution', 'version', 'help', 'init with spaces', 'nonzero exit', 'npm bin entry', 'missing optional dependency'] };
   } finally {
     const contained = relative(tempRoot, resolve(temp));
     if (!contained || contained === '..' || contained.startsWith(`..${sep}`) || !contained.startsWith('blip npm smoke ')) {

@@ -14,6 +14,7 @@ import (
 )
 
 func TestSourceCommandsMigrateDisableRemoveAndKeepBinding(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	root := t.TempDir()
 	path := filepath.Join(root, "配置 with spaces.json")
 	if err := store.WriteJSON(path, config.Config{SchemaVersion: 1, CodexHome: filepath.Join(root, "default"), Destinations: []config.Destination{}}); err != nil {

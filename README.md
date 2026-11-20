@@ -59,7 +59,9 @@ blip
 
 ### 3. 在编程助手中信任 Hook
 
-按对应编程助手的提示审阅并信任新增 Hook。Codex 中的既有会话可能需要重新打开；若已显式关闭 hooks，需先在 Codex 中启用。
+**从旧版升级到固定路径版时，每台使用 Codex 的机器都要重新运行一次 `blip install codex`。** 然后在 Codex CLI 的 `/hooks` 或桌面版的 Hooks 设置中审阅并信任新注册的回调。使用命名来源时加上对应的 `--source ID`。[Codex Hook 审阅说明](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
+
+Windows 上，npm 和各助手回调使用 `%LOCALAPPDATA%\Programs\Blip\blip.exe`。npm 全局安装或升级时校验并更新这份程序。使用 `--ignore-scripts` 时首次运行 `blip` 会完成同步。之后普通升级沿用同一条 Hook 命令。[npm 安装与升级](docs/npm-distribution.md#配置和升级)
 
 随后检查接入与投递：
 

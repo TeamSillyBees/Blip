@@ -2,6 +2,10 @@
 
 首版验收目标为 Windows 的 Codex CLI 与桌面版。以下区分接口文档、已有实机证据与 Blip 本地测试；不将协议模拟称为所有 Codex 路径已经实测。
 
+## Windows 固定程序与 Codex 回调（0.4.0）
+
+在隔离的 Windows 用户目录重新接入默认 Codex 来源后，官方 Codex CLI 0.169.1 的 `hooks/list` 返回一条 `PreToolUse` 和一条 `PermissionRequest` 回调，两条均为 `untrusted`。它们直接执行固定的 `blip.exe hook --source codex-default`。升级到此版本的机器需要在 Codex 中审阅并信任新注册。[Codex Hook 审阅说明](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
+
 ## Codex 固定 hook 入口（2026-11-09，0.2.2）
 
 - 参考本机 Orca 的固定 `~/.orca/agent-hooks/codex-hook.cmd` 挂载方式。Blip 在配置的 Codex home 下维护独立入口与可变转发目标；入口不包含 npm/Node 版本路径，不需要 Node、PowerShell 或运行时 PATH 查找。Windows 使用原生 cmd，Linux/macOS 使用 POSIX sh。

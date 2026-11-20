@@ -3,6 +3,7 @@
 const { spawn } = require('node:child_process');
 const { constants } = require('node:os');
 const { getTarget } = require('./platforms.cjs');
+const { synchronize } = require('./sync.cjs');
 const { version } = require('../package.json');
 
 function resolveBinary(platform, arch, resolve = require.resolve) {
@@ -22,7 +23,8 @@ function run(args, dependencies = {}) {
   const createChild = dependencies.spawn || spawn;
   let binary;
   try {
-    binary = resolveBinary(runtime.platform, runtime.arch, dependencies.resolve);
+    const bundled = resolveBinary(runtime.platform, runtime.arch, dependencies.resolve);
+    binary = (dependencies.synchronize || synchronize)(bundled, getTarget(runtime.platform, runtime.arch));
   } catch (error) {
     runtime.stderr.write(`Blip: ${error.message}\n`);
     runtime.exitCode = 1;

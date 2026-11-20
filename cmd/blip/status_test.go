@@ -61,6 +61,7 @@ func TestStatusShowsDeliveryFailureWithoutCredentialsOrStaleReadiness(t *testing
 }
 
 func TestHumanStatusChecksHooksAsCurrentUserInsteadOfServiceSnapshot(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
 	dir := t.TempDir()
 	c := config.Config{SchemaVersion: 1, Path: filepath.Join(dir, "config.json"), CodexHome: filepath.Join(dir, "codex"), StateDir: filepath.Join(dir, "state"), Destinations: []config.Destination{}}
 	if err := store.WriteJSON(c.Path, c); err != nil {

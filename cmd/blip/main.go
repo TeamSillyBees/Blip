@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.3.1+local"
+var version = "0.4.0+local"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -64,7 +64,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		if err := requiredFlagsError(command); err != nil {
 			return err
 		}
-		if path != "" || command == root || command.Name() == "help" || command.Name() == "version" || command.HasSubCommands() {
+		if path != "" || command == root || command.Name() == "help" || command.Name() == "version" || command.Name() == "sync-executable" || command.HasSubCommands() {
 			return nil
 		}
 		for parent := command; parent != nil; parent = parent.Parent() {
@@ -78,6 +78,21 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		return fmt.Errorf("配置文件路径不能为空")
 	}
 	root.AddCommand(newServiceCommand(&path))
+	// npm verifies the packaged binary before invoking this helper. Recheck
+	// its digest against the exact bytes being installed under the shared lock.
+	root.AddCommand(&cobra.Command{
+		Use: "sync-executable <sha256>", Hidden: true, Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args[0]) != 64 {
+				return fmt.Errorf("缺少随包程序的 SHA-256 校验值")
+			}
+			path, err := platform.EnsureClientExecutable(cmd.Context(), version, args[0])
+			if err == nil {
+				fmt.Fprintln(cmd.OutOrStdout(), path)
+			}
+			return err
+		},
+	})
 	root.AddCommand(newSourcesCommand(&path))
 	root.SetVersionTemplate("{{.Version}}\n")
 	for _, entry := range []struct{ name, description string }{
@@ -349,7 +364,7 @@ func start(ctx context.Context, c config.Config, output io.Writer) error {
 		}
 		return nil
 	}
-	executable, err := os.Executable()
+	executable, err := platform.EnsureClientExecutable(ctx, version, "")
 	if err != nil {
 		return err
 	}

@@ -33,7 +33,7 @@ func TestInstallUninstallPreservesOtherHooksAndSettings(t *testing.T) {
 	if string(first) != string(second) {
 		t.Fatal("reinstall duplicated or changed handlers")
 	}
-	if err := Uninstall(context.Background(), c); err != nil {
+	if err := Uninstall(context.Background(), c, executable, config.DefaultSourceID); err != nil {
 		t.Fatal(err)
 	}
 	var expected, actual any
@@ -74,15 +74,5 @@ func TestInstallDoesNotOverwriteDisabledOrMalformedConfiguration(t *testing.T) {
 				t.Fatalf("validation failure created managed files: %s", path)
 			}
 		}
-	}
-}
-
-func TestPathQuoting(t *testing.T) {
-	_, windows, err := Commands(`C:\工具 空格\blip.exe`, `C:\配置 目录\config.json`)
-	if err != nil || windows != `"C:\工具 空格\blip.exe" --config "C:\配置 目录\config.json" hook` {
-		t.Fatalf("bad Windows command %q %v", windows, err)
-	}
-	if _, _, err = Commands(`C:\%TEMP%\blip.exe`, `C:\cfg.json`); err == nil {
-		t.Fatal("cmd expansion was permitted in a literal path")
 	}
 }

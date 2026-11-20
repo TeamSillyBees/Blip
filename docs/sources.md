@@ -32,7 +32,7 @@ blip sources remove --source codex-work
 
 `install` 在新增来源时自动迁移旧配置，新来源使用事件 v2。`--home` 相对当前终端解析为绝对位置，手动 JSON 中的相对路径以配置文件目录为基准。重复安装沿用原来的来源 ID、目录及进度。`--register-only` 可用于只登记来源和安装客户端接入的脚本。
 
-`blip sources` 在交互终端列出来源，脚本使用 `blip sources list` 获取 JSON。使用 `sources add` 手动登记的来源，可用 `blip install <客户端> --source <ID>` 安装接入、刷新服务读取权限并启动。Claude Code、Hermes 和 DSH 各只有一个已配置来源时可省略 `--source`，有多个时命令会列出可选 ID。安装 Codex 时默认使用 `codex-default` 或接入默认目录，其他目录可用 `--source` 指定。卸载 Codex 时省略 `--source` 始终清理 `codex-default` 的接入。Hook 调用原生程序和绝对配置路径，裸 `blip hook` 指向 `codex-default`。
+`blip sources` 在交互终端列出来源，脚本使用 `blip sources list` 获取 JSON。使用 `sources add` 手动登记的来源，可用 `blip install <客户端> --source <ID>` 安装接入、刷新服务读取权限并启动。Claude Code、Hermes 和 DSH 各只有一个已配置来源时可省略 `--source`，有多个时命令会列出可选 ID。安装 Codex 时默认使用 `codex-default` 或接入默认目录，其他目录可用 `--source` 指定。卸载 Codex 时省略 `--source` 始终清理 `codex-default` 的接入。Codex 回调直接调用原生程序并显式传入来源 ID，自定义配置还会传入对应的配置路径。
 
 来源停用后，新 hook 被忽略，旧队列继续投递。Codex collector 的 checkpoint 保留，重新启用会补收持久日志中的增量；纯 hook 来源无法补收停用时忽略的回调。
 
