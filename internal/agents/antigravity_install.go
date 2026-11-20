@@ -44,7 +44,7 @@ func (a *antigravityAdapter) Install(ctx context.Context, executable string) err
 	}
 	group := map[string]any{
 		"PreInvocation": handler("PreInvocation"),
-		"PreToolUse":    []any{map[string]any{"matcher": "^(ask_question|ask_permission)$", "hooks": handler("PreToolUse")}},
+		"PreToolUse":    []any{map[string]any{"matcher": "^(ask_question|ask_permission|run_command)$", "hooks": handler("PreToolUse")}},
 		"Stop":          handler("Stop"),
 	}
 	return i.editSettings(ctx, []jsonHookEntry{{Event: a.groupName(), Hook: group}}, true, a.updateGroup)

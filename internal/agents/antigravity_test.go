@@ -74,8 +74,11 @@ func TestAntigravityNativeHooks(t *testing.T) {
 		if e.Kind == event.InputRequested && (e.RequestID != "call-question" || len(e.Questions) != 1 || e.Questions[0].Text != "Test input?" || !slices.Equal(e.Questions[0].Options, []string{"Yes", "No"})) {
 			t.Fatalf("lost question: %+v", e)
 		}
+		if e.Kind == event.ApprovalRequested && (e.RequestID != "call-outside" || e.Detail != "申请在沙箱外运行命令。\nTesting Blip prompts") {
+			t.Fatalf("wrong command approval: %+v", e)
+		}
 	}
-	if len(jobs) != 3 || kinds[event.InputRequested] != 1 || kinds[event.TurnCompleted] != 2 {
+	if len(jobs) != 4 || kinds[event.ApprovalRequested] != 1 || kinds[event.InputRequested] != 1 || kinds[event.TurnCompleted] != 2 {
 		t.Fatalf("wrong events after replay: %v", kinds)
 	}
 	if _, err := os.Stat(DiagnosticPath(c, app.ID)); !errors.Is(err, os.ErrNotExist) {
@@ -83,6 +86,34 @@ func TestAntigravityNativeHooks(t *testing.T) {
 	}
 	if _, err := os.Stat(cli.Home); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("hook needed or created client data: %v", err)
+	}
+}
+
+func TestAntigravityCommandApprovalRequiresExplicitSandboxRequest(t *testing.T) {
+	home := t.TempDir()
+	a := newAntigravity(config.Config{StateDir: t.TempDir()}, config.Source{ID: "app", Home: home})
+	for _, tc := range []struct {
+		flag any
+		want int
+	}{{true, 1}, {"true", 1}, {false, 0}, {"false", 0}, {nil, 0}, {"yes", 0}, {1, 0}} {
+		args := map[string]any{"CommandLine": "git commit -m example"}
+		if tc.flag != nil {
+			args["BypassSandbox"] = tc.flag
+		}
+		raw, err := json.Marshal(map[string]any{
+			"hookEventName": "PreToolUse", "conversationId": "chat", "artifactDirectoryPath": filepath.Join(home, "brain", "chat"),
+			"stepIdx": 15, "toolCall": map[string]any{"name": "run_command", "args": args},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := a.ParseHook(context.Background(), raw, time.Now())
+		if err != nil || len(got) != tc.want {
+			t.Fatalf("BypassSandbox=%#v: %+v %v", tc.flag, got, err)
+		}
+		if tc.want == 1 && (got[0].Kind != event.ApprovalRequested || got[0].Detail != "申请在沙箱外运行命令。" || got[0].ID != event.SourceEventID("app", "antigravity", "approval_requested", "chat", "step:15")) {
+			t.Fatalf("BypassSandbox=%#v: wrong approval from step: %+v", tc.flag, got[0])
+		}
 	}
 }
 

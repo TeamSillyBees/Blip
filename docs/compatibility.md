@@ -182,6 +182,16 @@ CLI 的实际审批、同步输入、各个网络/命令授权，以及真实失
 - Windows 上使用 agy CLI 1.5.9、本地模拟模型和回环 HTTP Webhook 实测。两端同时注册后，`ask_question` 的问题和选项送达 CLI 来源一次，同一会话连续两轮相同输入各送达一次完成提醒。
 - 实测普通 `run_command` 触发了客户端审批，Blip 保持静默。显式 `ask_permission` 和异常 `Stop` 按官方协议验证。桌面版使用同一协议，已验证其注册、来源隔离和回调处理，尚未实测桌面界面触发事件。[接入说明](antigravity.md) · [Hook 样本](../internal/agents/testdata/antigravity/README.md)
 
+## Antigravity 沙箱外命令审批（2026-11-20）
+
+- Antigravity App 2.33.0 的桌面记录包含两次 `git commit` 调用。第一次在沙箱内失败，第二次以 `BypassSandbox=true` 申请在沙箱外运行。通过已注册的回调回放这两次调用，并重复发送第二次调用，本地 Webhook 共收到一条审批提醒，带有桌面显示的操作摘要。
+- 在 Windows 上用 agy CLI 1.5.9、本地模拟模型和回环 Webhook 验证了投递时机。客户端发出 `session/request_permission` 后保持等待，Webhook 收到审批提醒，测试才取消这次请求。[接入说明](antigravity.md)
+
+## Antigravity 完成提醒的最后回复（2026-11-20）
+
+- agy CLI 1.5.9 的 `Stop` 回调执行时，会话记录已写入最终回复。使用本地模拟模型在同一会话连续回答两轮，回环 Gotify 接口的 `message` 和 Webhook 的 `detail` 都收到了各自轮次的回复。
+- 回放 Antigravity App 2.33.0 的本机会话记录，正常结束提醒附上的正文与该轮最后一条可见助手回复一致。[接入说明](antigravity.md)
+
 ## 一手资料
 
 - [Codex Hooks](https://learn.chatgpt.com/docs/hooks)：事件、信任机制、工具覆盖、默认启用与 commandWindows。

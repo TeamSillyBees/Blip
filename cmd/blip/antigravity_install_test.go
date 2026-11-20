@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -52,9 +53,21 @@ func TestAntigravityInstallRegistersOnceAndReusesExistingSources(t *testing.T) {
 		t.Fatal("repeated installs rewrote the configuration")
 	}
 	hooksPath := filepath.Join(profile, ".gemini", "config", "hooks.json")
-	var groups map[string]json.RawMessage
+	var groups map[string]struct{ PreToolUse []struct{ Matcher string } }
 	if err := store.ReadJSON(hooksPath, &groups); err != nil || len(groups) != 2 {
 		t.Fatalf("expected one shared settings file and two source groups: %v %v", groups, err)
+	}
+	for name, group := range groups {
+		if len(group.PreToolUse) != 1 {
+			t.Fatalf("%s has %d PreToolUse registrations", name, len(group.PreToolUse))
+		}
+		matcher, err := regexp.Compile(group.PreToolUse[0].Matcher)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !matcher.MatchString("run_command") || !matcher.MatchString("ask_permission") || !matcher.MatchString("ask_question") || matcher.MatchString("run_command_status") {
+			t.Fatalf("unexpected PreToolUse matcher for %s: %s", name, matcher)
+		}
 	}
 	c, err := config.ReadLocal(path)
 	if err != nil || len(c.Sources) != 3 || c.Sources[0].EventVersion != 1 {

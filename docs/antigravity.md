@@ -1,10 +1,10 @@
 # Antigravity 桌面版与 agy CLI
 
-Blip 通过客户端的原生 Hook 接收提问、显式权限申请和结束事件。回调把通知写入本地持久队列，后台进程负责投递到已配置的渠道。
+Blip 通过客户端的原生 Hook 接收提问、显式权限申请、沙箱外命令请求和结束事件。回调把通知写入本地持久队列，后台进程负责投递到已配置的渠道。
 
 ## 安装与升级
 
-Windows 使用当前账户的管理员 PowerShell。按实际使用的客户端执行命令，两端都用时各执行一次。从 `0.3.0` 升级到原生 Hook 版时也需要执行一次，以注册新回调并更新后台进程。
+Windows 使用当前账户的管理员 PowerShell。按实际使用的客户端执行命令，两端都用时各执行一次。原先使用 `0.4.0` 或更早版本的用户，安装包含沙箱外命令提醒的版本后，需要重新执行对应命令，让客户端把 `run_command` 也交给 Blip。
 
 ```powershell
 blip install antigravity   # 桌面版
@@ -21,10 +21,15 @@ blip install agy           # CLI
 | --- | --- |
 | `PreToolUse` 调用 `ask_question` | 需要回复，附问题和选项 |
 | `PreToolUse` 调用 `ask_permission` | 工具已发起显式权限申请 |
-| `Stop` 报告完全空闲并正常结束 | 本轮已结束 |
+| `PreToolUse` 调用 `run_command`，且 `BypassSandbox` 为 `true` | 命令申请在沙箱外运行，附客户端提供的操作摘要 |
+| `Stop` 报告完全空闲并正常结束 | 本轮已结束，通知正文可附最后一条助手回复 |
 | `Stop` 报告完全空闲并因错误、执行上限或终止步骤停下 | 运行遇到问题或已停下 |
 
-普通命令、文件或 MCP 工具的隐式审批，以及工具运行中由 MCP 服务端发起的提问，都缺少对应的原生 Hook。Blip 无法为这些弹窗发出提醒。如果其他停止钩子要求继续执行，本次 `Stop` 之后仍可能出现新活动。[Google 支持的事件](https://antigravity.google/docs/hooks#supported-events)
+例如，`git commit` 在沙箱内执行失败，助手申请改在沙箱外执行时，Blip 会推送一次“需要确认”。原生 Hook 报告的是这次授权申请，客户端仍按当前权限规则决定是否弹窗。已有授权或自动批准时也可能收到这条通知。[Google 权限设置](https://antigravity.google/docs/agent-settings)
+
+普通命令仅因客户端策略触发的确认框、文件或 MCP 工具的隐式审批，以及 MCP 工具运行中发起的提问，缺少可单独识别的原生回调。其他停止钩子如果要求继续执行，本次 `Stop` 之后仍可能出现新活动。[Google 支持的事件](https://antigravity.google/docs/hooks#supported-events)
+
+正常结束时，Blip 从当前会话的 `transcript.jsonl` 末尾提取本轮助手对用户可见的最终回复，保留换行，最多 4000 字节。各通知渠道仍有自身的长度限制。记录暂时不可读或本轮缺少最终回复时，Blip 仍会发送完成提醒。[Google Stop 回调](https://antigravity.google/docs/hooks#stop)
 
 `PreInvocation` 提供区分连续轮次的步骤位置。Blip 结合来源、会话和工具调用 ID 或步骤位置去重。通知从 Hook 启用后开始采集，已经入队的通知可在后台重启后继续投递。
 

@@ -129,7 +129,7 @@ func (a *antigravityAdapter) ParseHook(ctx context.Context, data []byte, now tim
 	case "PreToolUse":
 		return h.toolEvent(e)
 	case "Stop":
-		return h.stopEvent(e, marker)
+		return h.stopEvent(ctx, e, marker, a.source.Home)
 	default:
 		return nil, nil
 	}
@@ -158,6 +158,25 @@ func (h *antigravityHook) toolEvent(e event.Event) ([]event.Event, error) {
 		}
 	case "ask_permission":
 		e.Kind, e.Detail = event.ApprovalRequested, h.ToolCall.Name
+	case "run_command":
+		var command struct {
+			BypassSandbox json.RawMessage `json:"BypassSandbox"`
+			Summary       string          `json:"toolSummary"`
+		}
+		if len(h.ToolCall.Args) == 0 {
+			return nil, nil
+		}
+		if err := json.Unmarshal(h.ToolCall.Args, &command); err != nil {
+			return nil, fmt.Errorf("invalid run_command arguments: %w", err)
+		}
+		// Native hooks carry a boolean. Some clients serialize tool arguments as strings.
+		if flag := string(command.BypassSandbox); flag != "true" && flag != `"true"` {
+			return nil, nil
+		}
+		e.Kind, e.Detail = event.ApprovalRequested, "申请在沙箱外运行命令。"
+		if summary := strings.TrimSpace(command.Summary); summary != "" {
+			e.Detail += "\n" + event.LimitBytes(summary, 300)
+		}
 	default:
 		return nil, nil
 	}
@@ -173,7 +192,7 @@ func (h *antigravityHook) toolEvent(e event.Event) ([]event.Event, error) {
 	return []event.Event{e}, nil
 }
 
-func (h *antigravityHook) stopEvent(e event.Event, marker string) ([]event.Event, error) {
+func (h *antigravityHook) stopEvent(ctx context.Context, e event.Event, marker, home string) ([]event.Event, error) {
 	if !h.FullyIdle {
 		return nil, nil
 	}
@@ -189,22 +208,27 @@ func (h *antigravityHook) stopEvent(e event.Event, marker string) ([]event.Event
 	}
 	var steps *int
 	err := store.ReadJSON(marker, &steps)
+	firstStep := 0
 	turn := "execution:" + strconv.Itoa(h.Execution) // attached after the first invocation
 	if err == nil && steps != nil && *steps >= 0 {
+		firstStep = *steps
 		turn = "steps:" + strconv.Itoa(*steps)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("invalid Antigravity invocation marker")
 	}
 	e.ID = event.SourceEventID(e.SourceID, e.Agent, "handoff", h.Conversation, turn, event.ID(h.LastUserInput))
+	if e.Kind == event.TurnCompleted {
+		e.Detail = antigravityFinalReply(ctx, home, h.Conversation, firstStep)
+	}
 	return []event.Event{e}, nil
 }
 
 func (*antigravityAdapter) Capabilities() []Capability {
 	const validation = "Google Antigravity hook contract; agy CLI 1.5.9 on Windows"
 	return []Capability{
-		{Event: "turn_completed", Support: "native", Evidence: "fully idle Stop with normal termination", Validation: validation},
+		{Event: "turn_completed", Support: "native", Evidence: "fully idle Stop with normal termination and final reply from the conversation transcript when available", Validation: validation},
 		{Event: "input_requested", Support: "native", Evidence: "PreToolUse ask_question with question text and options; in-tool MCP elicitation is not exposed", Validation: validation},
-		{Event: "approval_requested", Support: "signal-only", Evidence: "explicit ask_permission tool call; implicit command/file/MCP approval prompts have no hook", Validation: "Google PreToolUse contract; explicit permission fixture"},
+		{Event: "approval_requested", Support: "signal-only", Evidence: "PreToolUse ask_permission or run_command requesting BypassSandbox; client policy determines whether a prompt appears", Validation: "Antigravity App 2.33.0 command trace; agy CLI 1.5.9 PreToolUse before interactive approval"},
 		{Event: "attention_required", Support: "native", Evidence: "fully idle Stop with error, limit or terminal reason", Validation: "Google Stop contract and termination reason fixtures"},
 	}
 }
