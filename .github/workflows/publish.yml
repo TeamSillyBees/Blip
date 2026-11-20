@@ -1,0 +1,75 @@
+name: Publish to npm
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: # Rehearse on GitHub without publishing a version.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blip-npm-release
+  queue: max
+
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch' || !github.event.deleted
+    uses: ./.github/workflows/check.yml
+    with:
+      release_tag: ${{ github.event_name == 'push' && github.ref_name || 'v0.0.0-rehearsal.0' }}
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: npm-release
+          path: dist/npm
+      - name: Verify npm authorization and rehearse both uploads
+        if: github.event_name == 'workflow_dispatch'
+        run: node scripts/publish-npm.mjs --dry-run
+      - name: Publish the tested native package and launcher
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: node scripts/publish-npm.mjs --publish
+
+  install:
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    permissions: {}
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install the release from the public registry
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $prefix = Join-Path $env:RUNNER_TEMP 'blip-public-install'
+          $cache = Join-Path $env:RUNNER_TEMP 'blip-npm-cache'
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'blip-profile'
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            npm install --global --prefix $prefix --cache $cache --prefer-online --registry=https://registry.npmjs.org/ --include=optional --no-audit --no-fund "@teamsillybees/blip@$version"
+            if ($LASTEXITCODE -eq 0) {
+              $reported = & (Join-Path $prefix 'blip.cmd') version
+              if ($LASTEXITCODE -eq 0 -and $reported -ceq $version) {
+                Write-Host "Verified blip $reported from the public registry."
+                exit 0
+              }
+            }
+            if ($attempt -lt 4) { Start-Sleep -Seconds 10 }
+          }
+          throw "Public installation did not provide blip $version."

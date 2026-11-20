@@ -52,7 +52,7 @@ blip
 
 若 npm 配置为省略可选依赖，可使用 `--include=optional` 重新安装启动器和原生包。
 
-## 验证和发布准备
+## 验证和发布
 
 ```powershell
 npm test
@@ -62,13 +62,15 @@ npm run test:npm-install
 
 安装测试从本地 tarball 安装到临时目录，使用隔离的配置目录和 npm 缓存，验证版本、帮助、带空格路径、退出码、npm 命令入口以及缺少原生包时的诊断。它不发布包，不修改真实 Codex 配置，也不发送真实通知。
 
-发布时，根 `package.json` 与 `npm/blip/package.json` 的版本必须一致，启动器的全部原生可选依赖也必须指向同一版本。打包命令将该版本写入 Go 可执行文件，生成 `dist/npm/manifest.json` 记录各 tarball 和完整性哈希。
-
-具备 `@teamsillybees` scope 发布权限后，先发布 Windows x64 原生包，再发布启动器包。仅发布本次 `manifest.json` 中列出的两个包，不使用可能包含历史构建的目录通配符。正式版本使用 `latest` 标签，例如：
+在要发布的提交上创建并推送一个新的版本标签。例如，发布 `0.4.1` 时执行以下命令。
 
 ```powershell
-npm publish ./dist/npm/teamsillybees-blip-win32-x64-0.4.0.tgz --access public --tag latest
-npm publish ./dist/npm/teamsillybees-blip-0.4.0.tgz --access public --tag latest
+git tag v0.4.1
+git push origin v0.4.1
 ```
 
-预发行版本单独使用 `next` 标签。主包和 Windows x64 包保留历史版本，已有的 `0.2.0-dev.0` 仍可在 Windows x64 上通过 `@next` 安装。仓库脚本不会自动执行 publish。
+GitHub Actions 从标签读取版本，写入两个发布包、启动器的原生依赖和 Go 程序。本地普通构建仍从两个 `package.json` 读取版本。工作流运行三平台检查，在 Windows 试装，然后按 `dist/npm/manifest.json` 的哈希依次发布原生包和启动器，最后从公共 npm 安装并运行 `blip version`。正式版本使用 `latest`，预发行标签（如 `v0.4.1-rc.1`）使用 `next`。
+
+在 GitHub 的 **Actions → Publish to npm → Run workflow** 可以演练构建、试装、两个包的 OIDC 授权和 npm 上传预检。只有推送版本标签才会上架。若中途失败，选择 **Re-run failed jobs** 可沿用原测试产物，已发布且哈希相同的包会跳过。
+
+npm 上的 `@teamsillybees/blip-win32-x64` 和 `@teamsillybees/blip` 各自授权 GitHub Actions。可信发布者的组织为 `TeamSillyBees`、仓库为 `Blip`、工作流文件名为 `publish.yml`，并启用 **Allow npm publish**。[npm 可信发布文档](https://docs.npmjs.com/trusted-publishers/)

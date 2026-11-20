@@ -48,6 +48,15 @@ async function main() {
   if (Object.keys(wrapper.optionalDependencies).length !== platforms.targets.length || platforms.targets.some((target) => wrapper.optionalDependencies[target.packageName] !== wrapper.version)) {
     throw new Error('Every native optional dependency must match the wrapper version.');
   }
+  const tag = process.env.BLIP_RELEASE_TAG;
+  if (tag) {
+    const parts = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(tag);
+    if (!parts || parts[4]?.split('.').some((id) => /^0\d+$/.test(id))) {
+      throw new Error(`Invalid npm release tag: ${tag}. Use vMAJOR.MINOR.PATCH with an optional prerelease.`);
+    }
+    wrapper.version = tag.slice(1);
+    for (const target of platforms.targets) wrapper.optionalDependencies[target.packageName] = wrapper.version;
+  }
   await mkdir(output, { recursive: true });
   const staging = await mkdtemp(join(output, '.staging-'));
   try {
