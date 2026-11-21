@@ -33,6 +33,8 @@ blip install agy           # CLI
 
 `PreInvocation` 提供区分连续轮次的步骤位置。Blip 结合来源、会话和工具调用 ID 或步骤位置去重。通知从 Hook 启用后开始采集，已经入队的通知可在后台重启后继续投递。
 
+通知正文首行显示对话名称。Blip 在入队时，用回调中的 `conversationId` 只读查询当前客户端 `conversation_summaries.db` 中的 `title`。入队时缺少名称的通知会在投递前再尝试读取一次。客户端尚未生成名称或数据库暂时不可读时，正文显示“未命名对话”。
+
 ## 检查与卸载
 
 ```powershell

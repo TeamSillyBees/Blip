@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -112,6 +113,14 @@ func (e Event) Validate() error {
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+// NormalizeSessionTitle keeps a recorded name on a single notification line.
+func NormalizeSessionTitle(title string) string {
+	words := strings.FieldsFunc(title, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	})
+	return LimitBytes(strings.Join(words, " "), 512)
+}
 
 func (e Event) AgentName() string {
 	switch e.Agent {

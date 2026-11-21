@@ -61,7 +61,7 @@ func (d Dispatcher) deliver(ctx context.Context, destination config.Destination,
 	// Older jobs and chats named after enqueueing can acquire their title
 	// at delivery time. Preserve titles already captured by the event.
 	if notification.SessionTitle == "" {
-		titleCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
+		titleCtx, stop := context.WithTimeout(ctx, agents.TitleLookupTimeout(notification.Agent))
 		if d.ResolveTitle != nil {
 			notification.SessionTitle = d.ResolveTitle(titleCtx, *notification)
 		} else if notification.SchemaVersion == 1 && notification.Agent == "codex" {

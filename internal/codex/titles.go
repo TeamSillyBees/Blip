@@ -6,9 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/TeamSillyBees/Blip/internal/event"
@@ -17,7 +15,6 @@ import (
 const (
 	titleChunkBytes  = 64 * 1024
 	maxTitleRowBytes = 64 * 1024
-	maxTitleBytes    = 512
 	titleLookupTime  = 450 * time.Millisecond
 )
 
@@ -112,9 +109,6 @@ func titleFromReverseRow(row []byte, sessionID string) (string, bool) {
 	if json.Unmarshal(row, &entry) != nil || entry.ID != sessionID || entry.ThreadName == nil {
 		return "", false
 	}
-	name := strings.Join(strings.FieldsFunc(*entry.ThreadName, func(char rune) bool {
-		return unicode.IsSpace(char) || unicode.IsControl(char)
-	}), " ")
 	// An explicitly empty latest name must not resurrect an older name.
-	return event.LimitBytes(name, maxTitleBytes), true
+	return event.NormalizeSessionTitle(*entry.ThreadName), true
 }

@@ -20,12 +20,19 @@ func antigravityFinalReply(ctx context.Context, home, conversation string, first
 	if deadline, ok := ctx.Deadline(); ok {
 		budget = min(budget, time.Until(deadline)/2)
 	}
+	return antigravityLookup(ctx, budget, func(ctx context.Context) string {
+		return readAntigravityReply(ctx, home, conversation, firstStep)
+	})
+}
+
+// Opening client files can block in the OS even after the lookup context expires.
+func antigravityLookup(ctx context.Context, budget time.Duration, read func(context.Context) string) string {
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	reply := make(chan string, 1)
-	go func() { reply <- readAntigravityReply(ctx, home, conversation, firstStep) }()
+	result := make(chan string, 1)
+	go func() { result <- read(ctx) }()
 	select {
-	case text := <-reply:
+	case text := <-result:
 		return text
 	case <-ctx.Done():
 		return ""

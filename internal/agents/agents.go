@@ -44,6 +44,16 @@ type Installer interface {
 type TitleResolver interface {
 	SessionTitle(context.Context, string) string
 }
+
+// TitleLookupTimeout leaves time to enqueue or deliver even if the title store
+// is busy. Opening a live SQLite database can take longer than reading an index file.
+func TitleLookupTimeout(harness string) time.Duration {
+	if harness == "antigravity" {
+		return 250 * time.Millisecond
+	}
+	return 50 * time.Millisecond
+}
+
 type ReadPath struct {
 	Path      string `json:"path"`
 	Directory bool   `json:"directory"`

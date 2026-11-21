@@ -95,7 +95,7 @@ func TestSessionTitleNormalizesAndBoundsUnicode(t *testing.T) {
 	}
 	writeTitleIndex(t, home, titleRow(t, "session", strings.Repeat("中文💻", 200), ""))
 	got := SessionTitle(context.Background(), home, "session")
-	if !utf8.ValidString(got) || len(got) > maxTitleBytes || !strings.HasSuffix(got, "…") {
+	if !utf8.ValidString(got) || len(got) > 512 || !strings.HasSuffix(got, "…") {
 		t.Fatal("long Unicode title was not bounded safely")
 	}
 }

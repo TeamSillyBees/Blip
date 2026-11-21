@@ -119,7 +119,7 @@ func capture(ctx context.Context, c config.Config, id string, reader io.Reader, 
 		}
 		e.DeviceName = c.DeviceName
 		if resolver, ok := adapter.(TitleResolver); ok && len(destinations) > 0 && e.SessionTitle == "" {
-			titleCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
+			titleCtx, stop := context.WithTimeout(ctx, TitleLookupTimeout(e.Agent))
 			e.SessionTitle = resolver.SessionTitle(titleCtx, e.SessionID)
 			stop()
 		}

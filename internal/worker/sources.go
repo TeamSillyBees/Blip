@@ -71,7 +71,7 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 				}
 				e.DeviceName = c.DeviceName
 				if resolver, ok := adapter.(agents.TitleResolver); ok && len(destinations) > 0 && e.SessionTitle == "" {
-					titleCtx, cancel := context.WithTimeout(pollCtx, 50*time.Millisecond)
+					titleCtx, cancel := context.WithTimeout(pollCtx, agents.TitleLookupTimeout(e.Agent))
 					e.SessionTitle = resolver.SessionTitle(titleCtx, e.SessionID)
 					cancel()
 				}
