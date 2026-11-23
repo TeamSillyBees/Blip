@@ -23,11 +23,26 @@ type fakeSender struct {
 	calls map[string]int
 }
 
+func (s *fakeSender) callCount(destinationID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls[destinationID]
+}
+
 type recordingSender struct {
+	mu            sync.Mutex
 	notifications []event.Event
 }
 
+func (s *recordingSender) notificationCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.notifications)
+}
+
 func (s *recordingSender) Send(_ context.Context, _ config.Destination, notification event.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.notifications = append(s.notifications, notification)
 	if len(s.notifications) == 1 {
 		return &channels.SendError{Message: "HTTP 503", Retryable: true}

@@ -50,23 +50,23 @@ func TestIdleDeliveryWaitsForPublicationAndRetryDeadline(t *testing.T) {
 		enqueueTurn(t, q, "new", "out")
 		time.Sleep(time.Second)
 		synctest.Wait()
-		if len(sender.notifications) != 0 {
+		if sender.notificationCount() != 0 {
 			t.Fatal("idle dispatcher scanned the queue before a wake")
 		}
 		changes <- event.ID("new") + ".json"
 		synctest.Wait()
-		if len(sender.notifications) != 1 {
+		if sender.notificationCount() != 1 {
 			t.Fatal("publication did not trigger the first attempt")
 		}
 		time.Sleep(5*time.Second - time.Millisecond)
 		changes <- ""
 		synctest.Wait()
-		if len(sender.notifications) != 1 {
+		if sender.notificationCount() != 1 {
 			t.Fatal("a second wake bypassed retry backoff")
 		}
 		time.Sleep(time.Millisecond)
 		synctest.Wait()
-		if len(sender.notifications) != 2 {
+		if sender.notificationCount() != 2 {
 			t.Fatal("retry required another publication")
 		}
 	})
@@ -84,7 +84,7 @@ func TestBacklogAndNewPublicationsRespectChannelPacing(t *testing.T) {
 				sender := &fakeSender{calls: map[string]int{}}
 				changes, stop := startTestDeliveries(t, Dispatcher{Queue: q, Sender: sender, Timeout: time.Second, MaxAttempts: 2}, tc.kind)
 				defer stop()
-				if sender.calls["out"] != 1 {
+				if sender.callCount("out") != 1 {
 					t.Fatal("startup did not drain the offline job")
 				}
 				enqueueTurn(t, q, "second", "out")
@@ -92,17 +92,17 @@ func TestBacklogAndNewPublicationsRespectChannelPacing(t *testing.T) {
 				changes <- "" // Recover both publications if their native events were lost.
 				time.Sleep(tc.gap - time.Millisecond)
 				synctest.Wait()
-				if sender.calls["out"] != 1 {
+				if sender.callCount("out") != 1 {
 					t.Fatal("publication bypassed channel pacing")
 				}
 				time.Sleep(time.Millisecond)
 				synctest.Wait()
-				if sender.calls["out"] != 2 {
+				if sender.callCount("out") != 2 {
 					t.Fatal("first queued job missed its deadline")
 				}
 				time.Sleep(tc.gap)
 				synctest.Wait()
-				if sender.calls["out"] != 3 {
+				if sender.callCount("out") != 3 {
 					t.Fatal("coalesced wake did not drain the backlog")
 				}
 			})
