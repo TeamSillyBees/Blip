@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/TeamSillyBees/Blip/internal/config"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -207,6 +209,9 @@ func Install(ctx context.Context, opts InstallOptions) (result error) {
 		if grantErr != nil {
 			return fmt.Errorf("grant service file access: %w", grantErr)
 		}
+	}
+	if err := reserveAntigravityGrants(&metadata, metadata.Sources, sid); err != nil {
+		return err
 	}
 	if err = registered.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
@@ -428,6 +433,17 @@ func cleanupInstallation(ctx context.Context, metadata installMetadata) error {
 	}
 	if err = noReparsePoints(directory); err != nil {
 		return err
+	}
+	// SCM has already removed or marked the service. A hook that started
+	// before deletion must finish before we remove its recorded grants.
+	if slices.ContainsFunc(metadata.Sources, func(s config.Source) bool { return s.Harness == "antigravity" }) {
+		lock, err := lockServiceGrants(ctx, metadata.StateDir)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if lock != nil {
+			defer lock.Close()
+		}
 	}
 	for index := len(metadata.Grants) - 1; index >= 0; index-- {
 		if err = ctx.Err(); err != nil {

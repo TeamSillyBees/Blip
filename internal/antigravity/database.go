@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/TeamSillyBees/Blip/internal/config"
 	"modernc.org/sqlite"
 )
 
@@ -27,7 +28,7 @@ func OpenSummaryDB(ctx context.Context, path string) (*SummaryDB, error) {
 	if err != nil {
 		return nil, err
 	}
-	home, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	home, err := config.ResolveHomePath(filepath.Dir(abs))
 	if err != nil {
 		return nil, err
 	}

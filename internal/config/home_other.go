@@ -4,4 +4,5 @@ package config
 
 import "path/filepath"
 
-func resolveHomePath(path string) (string, error) { return filepath.EvalSymlinks(path) }
+// ResolveHomePath resolves the path of an existing source directory.
+func ResolveHomePath(path string) (string, error) { return filepath.EvalSymlinks(path) }

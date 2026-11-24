@@ -64,11 +64,6 @@ func (a *antigravityAdapter) watch(h antigravityHook, first int, now time.Time) 
 }
 
 func (a *antigravityAdapter) watchTool(h antigravityHook, marker string, now time.Time) error {
-	switch h.ToolCall.Name {
-	case "ask_permission", "ask_question", "run_command":
-	default:
-		return nil
-	}
 	var first int
 	err := store.ReadJSON(marker, &first)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

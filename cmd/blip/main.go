@@ -16,6 +16,7 @@ import (
 	"github.com/TeamSillyBees/Blip/internal/agents"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/platform"
+	"github.com/TeamSillyBees/Blip/internal/service"
 	"github.com/TeamSillyBees/Blip/internal/setup"
 	"github.com/TeamSillyBees/Blip/internal/store"
 	"github.com/TeamSillyBees/Blip/internal/worker"
@@ -282,7 +283,7 @@ func execute(ctx context.Context, path string, command []string, input io.Reader
 			id = command[1]
 		}
 		if len(command) > 2 {
-			_ = agents.CaptureAntigravity(ctx, c, id, command[2], input)
+			_ = agents.CaptureAntigravity(ctx, c, id, command[2], input, service.RefreshAntigravityAccess)
 		} else {
 			_ = agents.Capture(ctx, c, id, input)
 		}

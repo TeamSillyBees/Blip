@@ -31,6 +31,11 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: go test ./...
+      - name: Antigravity notifications under Windows LocalService
+        if: runner.os == 'Windows'
+        run: go test ./internal/service -run '^TestWindowsServiceAntigravityWaits$' -count=1 -v
+        env:
+          BLIP_TEST_WINDOWS_SERVICE: '1'
       - run: go vet ./...
       - run: go build ./cmd/blip
       - run: npm test

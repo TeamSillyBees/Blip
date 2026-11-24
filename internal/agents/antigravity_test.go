@@ -51,7 +51,7 @@ func TestAntigravityNativeHooks(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, s := range c.Sources {
-				if err := CaptureAntigravity(ctx, c, s.ID, name, bytes.NewReader(payload)); err != nil {
+				if err := CaptureAntigravity(ctx, c, s.ID, name, bytes.NewReader(payload), nil); err != nil {
 					t.Fatal(err)
 				}
 			}

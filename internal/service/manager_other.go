@@ -14,3 +14,5 @@ func Stop(context.Context, string) error                                   { ret
 func Uninstall(context.Context, string) error                              { return ErrUnsupported }
 func Query(string) (Status, error)                                         { return Status{}, ErrUnsupported }
 func UpdateSources(context.Context, string, []config.Source, string) error { return ErrUnsupported }
+
+func RefreshAntigravityAccess(context.Context, config.Config, config.Source) error { return nil }

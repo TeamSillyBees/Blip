@@ -9,11 +9,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Resolve identity through a metadata-only handle. EvalSymlinks walks parent
+// ResolveHomePath uses a metadata-only handle. EvalSymlinks walks parent
 // directories and can fall back to GENERIC_READ when another process has them
 // open. A LocalService worker is intentionally allowed to read session files,
 // not list the entire harness home or read its credentials.
-func resolveHomePath(path string) (string, error) {
+func ResolveHomePath(path string) (string, error) {
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return "", err

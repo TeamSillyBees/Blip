@@ -22,6 +22,7 @@ type antigravityAdapter struct {
 	config          config.Config
 	source          config.Source
 	registeredEvent string
+	refreshAccess   func(context.Context, config.Config, config.Source) error
 	db              *antigravity.SummaryDB
 	dbFile          os.FileInfo
 	checked         map[string]antigravityCheck
@@ -33,9 +34,9 @@ func newAntigravity(c config.Config, s config.Source) Adapter {
 
 // Older clients omit hookEventName. Each installed command identifies its
 // event independently of stdin and delegates to the same durable queue.
-func CaptureAntigravity(ctx context.Context, c config.Config, id, name string, input io.Reader) error {
+func CaptureAntigravity(ctx context.Context, c config.Config, id, name string, input io.Reader, refreshAccess func(context.Context, config.Config, config.Source) error) error {
 	return capture(ctx, c, id, input, Registry{"antigravity": func(c config.Config, s config.Source) Adapter {
-		return &antigravityAdapter{config: c, source: s, registeredEvent: name}
+		return &antigravityAdapter{config: c, source: s, registeredEvent: name, refreshAccess: refreshAccess}
 	}})
 }
 
@@ -124,16 +125,22 @@ func (a *antigravityAdapter) ParseHook(ctx context.Context, data []byte, now tim
 	marker := filepath.Join(StateDir(a.config, a.source), "invocations", event.ID(h.Conversation)+".json")
 	switch h.Name {
 	case "PreInvocation":
-		if h.Invocation != nil && *h.Invocation == 0 && h.InitialSteps != nil && *h.InitialSteps >= 0 {
-			if err := store.WriteJSON(marker, *h.InitialSteps); err != nil {
-				return nil, err
-			}
-			return nil, a.watch(h, *h.InitialSteps, now)
+		if h.Invocation == nil || *h.Invocation != 0 || h.InitialSteps == nil || *h.InitialSteps < 0 {
+			return nil, nil
 		}
+		if err := store.WriteJSON(marker, *h.InitialSteps); err != nil {
+			return nil, err
+		}
+		err = a.watch(h, *h.InitialSteps, now)
 	case "PreToolUse":
 		// This can be the first callback when attaching in the middle of a turn.
 		// A tool about to run does not prove that its caller is waiting for a human.
-		return nil, a.watchTool(h, marker, now)
+		switch h.ToolCall.Name {
+		case "ask_permission", "ask_question", "run_command":
+			err = a.watchTool(h, marker, now)
+		default:
+			return nil, nil
+		}
 	case "Stop":
 		if !h.FullyIdle {
 			return nil, nil
@@ -141,8 +148,15 @@ func (a *antigravityAdapter) ParseHook(ctx context.Context, data []byte, now tim
 		e := event.Event{SchemaVersion: 2, Agent: "antigravity", Source: "antigravity/hooks", SourceID: a.source.ID,
 			SessionID: h.Conversation, Project: harnessProject(h.CWD, "Antigravity"), CWD: h.CWD, OccurredAt: now.UTC()}
 		return a.stopEvent(ctx, h, e, marker)
+	default:
+		return nil, nil
 	}
-	return nil, nil
+	// The client owns newly created SQLite files. Restore the installed
+	// service's read access after recording the watch, even on reattachment.
+	if err == nil && a.refreshAccess != nil {
+		err = a.refreshAccess(ctx, a.config, a.source)
+	}
+	return nil, err
 }
 
 func (a *antigravityAdapter) stopEvent(ctx context.Context, h antigravityHook, e event.Event, marker string) ([]event.Event, error) {

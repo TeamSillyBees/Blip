@@ -37,7 +37,7 @@ func TestAntigravityHookQueuesRecordedTitle(t *testing.T) {
 		t.Helper()
 		hook := antigravityHook{Conversation: id, Artifacts: filepath.Join(s.Home, "brain", id), LastUserInput: turn, CWD: filepath.Join(s.Home, "project"), FullyIdle: true, Termination: "NO_TOOL_CALL"}
 		payload, _ := json.Marshal(hook)
-		if err := CaptureAntigravity(ctx, c, s.ID, "Stop", bytes.NewReader(payload)); err != nil {
+		if err := CaptureAntigravity(ctx, c, s.ID, "Stop", bytes.NewReader(payload), nil); err != nil {
 			t.Fatal(err)
 		}
 		if notify {

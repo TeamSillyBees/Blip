@@ -3,6 +3,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -230,34 +231,8 @@ func applyPermission(target permissionTarget, sid *windows.SID, recorded bool, b
 	if err != nil {
 		return change, err
 	}
-	if acl == nil {
-		// A null DACL already permits access; replacing it with only this service
-		// would silently remove other access, so leave it intact.
-		return change, nil
-	}
-	for index := uint32(0); index < uint32(acl.AceCount); index++ {
-		var ace *windows.ACCESS_ALLOWED_ACE
-		if err = windows.GetAce(acl, index, &ace); err != nil {
-			return change, err
-		}
-		if ace.Header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE && ace.Header.AceFlags&windows.INHERITED_ACE == 0 && (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String() == sid.String() {
-			if recorded && ace.Mask&target.permissions == target.permissions && uint32(ace.Header.AceFlags) == target.inheritance {
-				return change, nil
-			}
-			return change, fmt.Errorf("service identity already has explicit access at %s; clean the prior service installation first", target.path)
-		}
-	}
-	var pinned runtime.Pinner
-	pinned.Pin(sid)
-	defer pinned.Unpin()
-	updated, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
-		AccessPermissions: target.permissions,
-		AccessMode:        windows.GRANT_ACCESS,
-		Inheritance:       target.inheritance,
-		Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER,
-			TrusteeValue: windows.TrusteeValueFromSID(sid)},
-	}}, acl)
-	if err != nil {
+	updated, err := aclWithServiceGrant(acl, target, sid, recorded)
+	if err != nil || updated == nil {
 		return change, err
 	}
 	if !recorded && beforeGrant != nil {
@@ -270,6 +245,90 @@ func applyPermission(target permissionTarget, sid *windows.SID, recorded bool, b
 	}
 	change.SID = sid.String()
 	return change, nil
+}
+
+// Return nil when no change is necessary.
+func aclWithServiceGrant(acl *windows.ACL, target permissionTarget, sid *windows.SID, recorded bool) (*windows.ACL, error) {
+	if acl == nil {
+		// A null DACL already permits access; replacing it with only this service
+		// would silently remove other access, so leave it intact.
+		return nil, nil
+	}
+	for index := uint32(0); index < uint32(acl.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, index, &ace); err != nil {
+			return nil, err
+		}
+		if ace.Header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE && ace.Header.AceFlags&windows.INHERITED_ACE == 0 && (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String() == sid.String() {
+			if recorded && ace.Mask&target.permissions == target.permissions && uint32(ace.Header.AceFlags) == target.inheritance {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("service identity already has explicit access at %s; clean the prior service installation first", target.path)
+		}
+	}
+	var pinned runtime.Pinner
+	pinned.Pin(sid)
+	defer pinned.Unpin()
+	return windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
+		AccessPermissions: target.permissions,
+		AccessMode:        windows.GRANT_ACCESS,
+		Inheritance:       target.inheritance,
+		Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER,
+			TrusteeValue: windows.TrusteeValueFromSID(sid)},
+	}}, acl)
+}
+
+// A client hook may see replacement files between callbacks. Inspect the
+// object and change its DACL through the same handle, without following a
+// reparse point or granting access to another name for a hard-linked file.
+func refreshRecordedPermission(target permissionTarget, sid *windows.SID) error {
+	// Service plans contain only absolute DOS drive paths. Ask NT to reject
+	// reparses in the whole name while opening it, including its ancestors.
+	name, err := windows.NewNTUnicodeString(`\??\` + target.path)
+	if err != nil {
+		return err
+	}
+	oa := windows.OBJECT_ATTRIBUTES{ObjectName: name, Attributes: windows.OBJ_DONT_REPARSE | windows.OBJ_CASE_INSENSITIVE}
+	oa.Length = uint32(unsafe.Sizeof(oa))
+	var h windows.Handle
+	var status windows.IO_STATUS_BLOCK
+	const share = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
+	const read = windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES
+	open := func(access uint32) error {
+		return windows.NtCreateFile(&h, access, &oa, &status, nil, 0, share, windows.FILE_OPEN, 0, 0, 0)
+	}
+	err = open(read | windows.WRITE_DAC)
+	if errors.Is(err, windows.STATUS_ACCESS_DENIED) {
+		// An existing admin-owned file can already have the necessary grant.
+		err = open(read)
+	}
+	if err != nil {
+		if nt, ok := err.(windows.NTStatus); ok {
+			err = nt.Errno()
+		}
+		return &os.PathError{Op: "open recorded service grant", Path: target.path, Err: err}
+	}
+	defer windows.CloseHandle(h)
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		return err
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || (info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0) != target.directory || (!target.directory && info.NumberOfLinks != 1) {
+		return fmt.Errorf("invalid file for recorded service grant at %s", target.path)
+	}
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	acl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	updated, err := aclWithServiceGrant(acl, target, sid, true)
+	if err != nil || updated == nil {
+		return err
+	}
+	return windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION, nil, nil, updated, nil)
 }
 
 func restorePermission(change aclChange) error {
