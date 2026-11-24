@@ -26,47 +26,52 @@ func antigravityFinalReply(ctx context.Context, home, conversation string, first
 }
 
 // Opening client files can block in the OS even after the lookup context expires.
-func antigravityLookup(ctx context.Context, budget time.Duration, read func(context.Context) string) string {
+func antigravityLookup[T any](ctx context.Context, budget time.Duration, read func(context.Context) T) T {
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	result := make(chan string, 1)
+	result := make(chan T, 1)
 	go func() { result <- read(ctx) }()
 	select {
 	case text := <-result:
 		return text
 	case <-ctx.Done():
-		return ""
+		var zero T
+		return zero
 	}
 }
 
 // Open the standard log relative to the bound conversation, never an arbitrary path from stdin.
-func readAntigravityReply(ctx context.Context, home, conversation string, firstStep int) string {
+func openAntigravityTranscript(home, conversation string) (*os.File, error) {
 	root, err := os.OpenRoot(home)
 	if err != nil {
-		return ""
+		return nil, err
 	}
 	defer root.Close()
 	chat := filepath.Join("brain", conversation)
 	info, err := root.Lstat(chat)
 	if err != nil || !info.IsDir() {
-		return ""
+		return nil, os.ErrNotExist
 	}
 	dir, err := root.OpenRoot(chat)
 	if err != nil {
-		return ""
+		return nil, err
 	}
 	defer dir.Close()
 	const log = ".system_generated/logs/transcript.jsonl"
 	info, err = dir.Stat(log)
 	if err != nil || !info.Mode().IsRegular() {
-		return ""
+		return nil, os.ErrNotExist
 	}
-	f, err := dir.Open(log)
+	return dir.Open(log)
+}
+
+func readAntigravityReply(ctx context.Context, home, conversation string, firstStep int) string {
+	f, err := openAntigravityTranscript(home, conversation)
 	if err != nil {
 		return ""
 	}
 	defer f.Close()
-	info, err = f.Stat()
+	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || ctx.Err() != nil {
 		return ""
 	}

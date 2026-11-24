@@ -153,7 +153,7 @@ B. Gotify
 
 完成通知在对话名和时间下方追加来源提供的最后一条回复内容，最多 4000 字节；内容为空时省略。默认模板不显示会话 ID 和轮次，结构化 webhook 保留详细字段。中文与 emoji 按 UTF-8 安全截断，企业微信整条文本限制为 2048 字节，较长回复可能进一步截断；飞书同时限制编码后的请求体大小。
 
-Codex 的对话名取自本地 `session_index.jsonl` 中该会话最新的名称记录。Antigravity 桌面版和 agy CLI 按会话 ID 从各自的 `conversation_summaries.db` 读取名称。入队时已取得的名称随通知保存，缺少名称时在发送前尝试补齐。没有名称或索引不可读时显示“未命名对话”。
+Codex 的对话名取自本地 `session_index.jsonl` 中该会话最新的名称记录。Antigravity 桌面版和 agy CLI 从各自的 `conversation_summaries.db` 读取主对话名称。入队时已取得的名称随通知保存，缺少名称时在发送前尝试补齐。名称仍缺失时，Antigravity 显示“项目名 对话”，其他来源显示“未命名对话”。
 
 自定义 webhook 的固定版本格式见 [webhook 协议](webhook.md)。
 
@@ -186,6 +186,6 @@ Codex 采集器监听会话日志的变化，每 30 秒核对一次目录，以�
 | 修改配置后未生效 | 执行 `blip restart`，或在向导选择“保存并启动”；已注册服务时，在管理员终端操作。 |
 | 升级后 Hook 仍指向旧程序 | 用新版程序执行 `blip install <客户端>`，或在向导中选择“保存并启动”刷新所有已启用来源。Windows 上会同时更新服务副本。[服务升级说明](windows-service.md#账户目录和升级) |
 | 来源显示 `degraded` | 查看 `status` 中逐来源的 `state` 和 `error_code`，按[来源诊断说明](sources.md#诊断和回退)恢复；保留原读取位置与绑定记录。 |
-| 对话名显示“未命名对话” | 确认客户端已为该会话保存名称，并检查名称索引是否可读。Codex 的索引权限见[Windows 服务指南](windows-service.md)。Antigravity 和 agy 读取各自的会话数据库，详见[接入说明](antigravity.md)。部分其他来源尚未提供对话名。 |
+| 对话名显示“未命名对话” | 确认客户端已为该会话保存名称，并检查名称索引是否可读。Codex 的索引权限见[Windows 服务指南](windows-service.md)。Antigravity 和 agy 在主对话没有标题时显示“项目名 对话”。[Antigravity 接入说明](antigravity.md)部分其他来源尚未提供对话名。 |
 
 提交问题时，请提供 Blip 与编程助手版本，以及脱敏后的 `doctor` / `status` 输出。

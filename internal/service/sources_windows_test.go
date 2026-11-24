@@ -30,7 +30,7 @@ func TestActivateAntigravitySourcePreservesLegacyServiceLedger(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !slices.Equal(args, serviceArguments(installed)) || installed.Format != 2 || len(installed.Sources) != 2 ||
-			installed.Sources[0].ID != config.DefaultSourceID || installed.Sources[1] != s || len(installed.ReadPaths) != 2 || len(installed.Grants) != 2 {
+			installed.Sources[0].ID != config.DefaultSourceID || installed.Sources[1] != s || len(installed.ReadPaths) != 5 || len(installed.Grants) != 2 {
 			t.Fatalf("upgrade lost grants, changed SCM identity or duplicated a source: %+v", installed)
 		}
 	}

@@ -182,6 +182,13 @@ func (e Event) Body() string {
 	title := strings.TrimSpace(e.SessionTitle)
 	if title == "" {
 		title = "未命名对话"
+		if e.Agent == "antigravity" {
+			project := NormalizeSessionTitle(e.Project)
+			if project == "" {
+				project = "Antigravity"
+			}
+			title = project + " 对话"
+		}
 	}
 	text.WriteString(title)
 	if !e.OccurredAt.IsZero() {

@@ -60,6 +60,8 @@ blip service uninstall   # 停止并删除服务，取消开机自启
 
 Codex 名称索引不存在或因文件替换而不可读时，通知会显示“未命名对话”。索引创建后可运行 `blip install codex` 刷新读取权限。
 
+Antigravity 的等待检测需要读取客户端的 `conversation_summaries.db` 及配套的 `-wal`、`-shm` 文件。升级或客户端首次创建数据库后，重新运行对应的安装命令可刷新服务读取权限。[Antigravity 接入说明](antigravity.md)
+
 ## 恢复与诊断
 
 服务初始化期间报告“正在启动”，工作进程就绪后才报告“正在运行”。停止或系统关机时会取消工作并等待退出，未确认送达的通知留待下次恢复。

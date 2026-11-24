@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TeamSillyBees/Blip/internal/antigravity"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/event"
 	"github.com/TeamSillyBees/Blip/internal/store"
@@ -21,6 +22,9 @@ type antigravityAdapter struct {
 	config          config.Config
 	source          config.Source
 	registeredEvent string
+	db              *antigravity.SummaryDB
+	dbFile          os.FileInfo
+	checked         map[string]antigravityCheck
 }
 
 func newAntigravity(c config.Config, s config.Source) Adapter {
@@ -115,87 +119,33 @@ func (a *antigravityAdapter) ParseHook(ctx context.Context, data []byte, now tim
 	if h.CWD == "" && len(h.Workspaces) > 0 {
 		h.CWD = h.Workspaces[0]
 	}
-	e := event.Event{SchemaVersion: 2, Agent: "antigravity", Source: "antigravity/hooks", SourceID: a.source.ID,
-		SessionID: h.Conversation, Project: harnessProject(h.CWD, "Antigravity"), CWD: h.CWD, OccurredAt: now.UTC()}
+	// The numeric invocation marker is also read from installations predating
+	// conversation watches. Keep its format and handoff identity stable.
 	marker := filepath.Join(StateDir(a.config, a.source), "invocations", event.ID(h.Conversation)+".json")
 	switch h.Name {
 	case "PreInvocation":
-		// executionNum can be zero on every turn, even for identical user
-		// prompts. The first invocation gives us the trajectory step count.
 		if h.Invocation != nil && *h.Invocation == 0 && h.InitialSteps != nil && *h.InitialSteps >= 0 {
-			return nil, store.WriteJSON(marker, *h.InitialSteps)
-		}
-		return nil, nil
-	case "PreToolUse":
-		return h.toolEvent(e)
-	case "Stop":
-		return h.stopEvent(ctx, e, marker, a.source.Home)
-	default:
-		return nil, nil
-	}
-}
-
-func (h *antigravityHook) toolEvent(e event.Event) ([]event.Event, error) {
-	switch h.ToolCall.Name {
-	case "ask_question":
-		e.Kind = event.InputRequested
-		// The tool uses "question" for the text, unlike Blip's public "text".
-		var input struct {
-			Questions []struct {
-				Question string   `json:"question"`
-				Options  []string `json:"options"`
-			} `json:"questions"`
-		}
-		if err := json.Unmarshal(h.ToolCall.Args, &input); err != nil || len(input.Questions) == 0 {
-			return nil, fmt.Errorf("invalid ask_question arguments")
-		}
-		for _, q := range input.Questions[:min(20, len(input.Questions))] {
-			question := event.Question{Text: event.LimitBytes(q.Question, 2000)}
-			for _, option := range q.Options[:min(20, len(q.Options))] {
-				question.Options = append(question.Options, event.LimitBytes(option, 300))
+			if err := store.WriteJSON(marker, *h.InitialSteps); err != nil {
+				return nil, err
 			}
-			e.Questions = append(e.Questions, question)
+			return nil, a.watch(h, *h.InitialSteps, now)
 		}
-	case "ask_permission":
-		e.Kind, e.Detail = event.ApprovalRequested, h.ToolCall.Name
-	case "run_command":
-		var command struct {
-			BypassSandbox json.RawMessage `json:"BypassSandbox"`
-			Summary       string          `json:"toolSummary"`
-		}
-		if len(h.ToolCall.Args) == 0 {
+	case "PreToolUse":
+		// This can be the first callback when attaching in the middle of a turn.
+		// A tool about to run does not prove that its caller is waiting for a human.
+		return nil, a.watchTool(h, marker, now)
+	case "Stop":
+		if !h.FullyIdle {
 			return nil, nil
 		}
-		if err := json.Unmarshal(h.ToolCall.Args, &command); err != nil {
-			return nil, fmt.Errorf("invalid run_command arguments: %w", err)
-		}
-		// Native hooks carry a boolean. Some clients serialize tool arguments as strings.
-		if flag := string(command.BypassSandbox); flag != "true" && flag != `"true"` {
-			return nil, nil
-		}
-		e.Kind, e.Detail = event.ApprovalRequested, "申请在沙箱外运行命令。"
-		if summary := strings.TrimSpace(command.Summary); summary != "" {
-			e.Detail += "\n" + event.LimitBytes(summary, 300)
-		}
-	default:
-		return nil, nil
+		e := event.Event{SchemaVersion: 2, Agent: "antigravity", Source: "antigravity/hooks", SourceID: a.source.ID,
+			SessionID: h.Conversation, Project: harnessProject(h.CWD, "Antigravity"), CWD: h.CWD, OccurredAt: now.UTC()}
+		return a.stopEvent(ctx, h, e, marker)
 	}
-	e.RequestID = h.ToolCall.ID
-	request := e.RequestID
-	if request == "" {
-		if h.Step == nil || *h.Step < 0 {
-			return nil, fmt.Errorf("Antigravity tool hook requires toolCall.id or stepIdx")
-		}
-		request = "step:" + strconv.Itoa(*h.Step)
-	}
-	e.ID = event.SourceEventID(e.SourceID, e.Agent, string(e.Kind), h.Conversation, request)
-	return []event.Event{e}, nil
+	return nil, nil
 }
 
-func (h *antigravityHook) stopEvent(ctx context.Context, e event.Event, marker, home string) ([]event.Event, error) {
-	if !h.FullyIdle {
-		return nil, nil
-	}
+func (a *antigravityAdapter) stopEvent(ctx context.Context, h antigravityHook, e event.Event, marker string) ([]event.Event, error) {
 	switch strings.TrimPrefix(strings.ToUpper(h.Termination), "EXECUTOR_TERMINATION_REASON_") {
 	case "NO_TOOL_CALL", "MODEL_STOP":
 		e.Kind = event.TurnCompleted
@@ -206,6 +156,13 @@ func (h *antigravityHook) stopEvent(ctx context.Context, e event.Event, marker, 
 	default:
 		return nil, nil
 	}
+	// Stop describes the execution loop of *this* conversation, including for
+	// workers several levels below the conversation the user opened.
+	root := a.stopRoot(ctx, h.Conversation)
+	if root.id == "" {
+		return nil, nil
+	}
+	e.SessionTitle = root.title
 	var steps *int
 	err := store.ReadJSON(marker, &steps)
 	firstStep := 0
@@ -218,17 +175,22 @@ func (h *antigravityHook) stopEvent(ctx context.Context, e event.Event, marker, 
 	}
 	e.ID = event.SourceEventID(e.SourceID, e.Agent, "handoff", h.Conversation, turn, event.ID(h.LastUserInput))
 	if e.Kind == event.TurnCompleted {
-		e.Detail = antigravityFinalReply(ctx, home, h.Conversation, firstStep)
+		e.Detail = antigravityFinalReply(ctx, a.source.Home, h.Conversation, firstStep)
 	}
 	return []event.Event{e}, nil
 }
 
 func (*antigravityAdapter) Capabilities() []Capability {
-	const validation = "Google Antigravity hook contract; agy CLI 1.5.9 on Windows"
+	const validation = "Google Antigravity hook contract; agy CLI 1.5.9; Antigravity App 2.34.0 conversation hierarchy"
 	return []Capability{
-		{Event: "turn_completed", Support: "native", Evidence: "fully idle Stop with normal termination and final reply from the conversation transcript when available", Validation: validation},
-		{Event: "input_requested", Support: "native", Evidence: "PreToolUse ask_question with question text and options; in-tool MCP elicitation is not exposed", Validation: validation},
-		{Event: "approval_requested", Support: "signal-only", Evidence: "PreToolUse ask_permission or run_command requesting BypassSandbox; client policy determines whether a prompt appears", Validation: "Antigravity App 2.33.0 command trace; agy CLI 1.5.9 PreToolUse before interactive approval"},
-		{Event: "attention_required", Support: "native", Evidence: "fully idle Stop with error, limit or terminal reason", Validation: "Google Stop contract and termination reason fixtures"},
+		{Event: "turn_completed", Support: "derived", Evidence: "fully idle normal Stop of the user’s root conversation", Validation: validation},
+		{Event: "input_requested", Support: "derived", Evidence: "a waiting step requests user input or blocking review, attributed to its root conversation", Validation: validation},
+		{Event: "approval_requested", Support: "derived", Evidence: "a waiting step requests user authorization, attributed to its root conversation", Validation: validation},
+		{Event: "attention_required", Support: "derived", Evidence: "fully idle root Stop with an error, limit or terminal reason", Validation: validation},
 	}
+}
+
+func (a *antigravityAdapter) ReadPaths() []ReadPath {
+	path := filepath.Join(a.source.Home, antigravity.SummaryFilename)
+	return []ReadPath{{Path: path, Optional: true}, {Path: path + "-wal", Optional: true}, {Path: path + "-shm", Optional: true}}
 }

@@ -15,6 +15,8 @@ import (
 
 func TestAntigravityStopIncludesCurrentVisibleReply(t *testing.T) {
 	home := t.TempDir()
+	db := summaryFixture(t, home)
+	execSummary(t, db, "INSERT INTO conversation_summaries (conversation_id) VALUES ('chat')")
 	a := newAntigravity(config.Config{StateDir: t.TempDir()}, config.Source{ID: "app", Home: home})
 	chat := filepath.Join(home, "brain", "chat")
 	logs := filepath.Join(chat, ".system_generated", "logs")

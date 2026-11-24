@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -142,8 +143,8 @@ func TestAntigravityHookNeutralResponses(t *testing.T) {
 	}
 	callback("PreToolUse", string(payload), allow)
 	jobs, err := (store.Queue{Dir: c.StateDir}).Load()
-	if err != nil || len(jobs) != 1 || jobs[0].Event.Kind != event.ApprovalRequested || jobs[0].Event.RequestID != "p" {
-		t.Fatalf("explicit permission hook: %+v %v", jobs, err)
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("permission request was sent before the client entered a wait: %+v %v", jobs, err)
 	}
 }
 
@@ -215,6 +216,23 @@ func testAntigravityInstallDelivery(t *testing.T, serviceMode bool) {
 		{"agy", "antigravity-cli", "agy"}, {"antigravity", "antigravity", "antigravity-app"},
 	} {
 		home := filepath.Join(dir, ".gemini", client.dir)
+		if err := os.MkdirAll(home, 0700); err != nil {
+			t.Fatal(err)
+		}
+		writer, err := sql.Open("sqlite", filepath.Join(home, "conversation_summaries.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { writer.Close() })
+		var samples map[string][]byte
+		if err := store.ReadJSON("../../internal/agents/testdata/antigravity/summaries.json", &samples); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = writer.Exec(`PRAGMA journal_mode=WAL;
+			CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY,parent_conversation_id TEXT,nesting_depth INTEGER,title TEXT,workspace_uris TEXT,status TEXT,not_fully_idle INTEGER,killed INTEGER,step_count INTEGER,last_user_input_step_index INTEGER,last_modified_time DATETIME,raw_summary BLOB);
+			INSERT INTO conversation_summaries VALUES ('test','',0,'Root','[]','CASCADE_RUN_STATUS_RUNNING',1,0,3,0,CURRENT_TIMESTAMP,?)`, samples["question"]); err != nil {
+			t.Fatal(err)
+		}
 		if out, err := exec.Command(binary, "install", client.name, "--config", path).CombinedOutput(); err != nil {
 			t.Fatalf("install %s: %s %v", client.name, out, err)
 		}

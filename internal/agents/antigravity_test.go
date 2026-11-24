@@ -23,13 +23,10 @@ func TestAntigravityNativeHooks(t *testing.T) {
 	cli := config.Source{ID: "cli", Harness: "antigravity", Home: filepath.Join(root, "antigravity-cli"), Enabled: true, EventVersion: 2}
 	c := config.Config{SchemaVersion: 2, StateDir: filepath.Join(root, "state"), Sources: []config.Source{app, cli}, Destinations: []config.Destination{{ID: "test", Enabled: true}}}
 	ctx := context.Background()
-	a := newAntigravity(c, cli)
-	if _, polls := a.(Collector); polls {
-		t.Fatal("hook-only source implements Collector")
-	}
-	if _, reads := a.(FileReader); reads {
-		t.Fatal("service requested access to client files")
-	}
+	a := newAntigravity(c, cli).(*antigravityAdapter)
+	t.Cleanup(func() { a.Close() })
+	db := summaryFixture(t, cli.Home)
+	execSummary(t, db, "INSERT INTO conversation_summaries (conversation_id,title) VALUES ('session','CLI task')")
 	if err := RecordCheckpointFault(ctx, c, cli, checkpointFailed("antigravity-summaries", event.ID("antigravity-summaries"), "")); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +56,22 @@ func TestAntigravityNativeHooks(t *testing.T) {
 				}
 			}
 		}
+		if call, ok := h["toolCall"].(map[string]any); ok {
+			var raw []byte
+			switch call["id"] {
+			case "call-question":
+				raw = waitingSample(t, "question", "call-question", 2)
+			case "call-outside":
+				raw = waitingSample(t, "permission", "call-outside", 4)
+			}
+			execSummary(t, db, "UPDATE conversation_summaries SET raw_summary=? WHERE conversation_id='session'", raw)
+			if err := a.Poll(ctx, func(e event.Event) error {
+				_, err := (store.Queue{Dir: c.StateDir}).Enqueue(ctx, e, []string{"test"})
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	jobs, err := (store.Queue{Dir: c.StateDir}).Load()
 	if err != nil {
@@ -67,7 +80,7 @@ func TestAntigravityNativeHooks(t *testing.T) {
 	kinds := map[event.Kind]int{}
 	for _, j := range jobs {
 		e := j.Event
-		if e.SourceID != cli.ID || e.Source != "antigravity/hooks" || e.SessionID != "session" || e.Project != "My Project" || e.TurnID != "" {
+		if e.SourceID != cli.ID || e.SessionID != "session" || e.Project != "My Project" || e.TurnID != "" {
 			t.Fatalf("incorrect source or session: %+v", e)
 		}
 		kinds[e.Kind]++
@@ -84,41 +97,15 @@ func TestAntigravityNativeHooks(t *testing.T) {
 	if _, err := os.Stat(DiagnosticPath(c, app.ID)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("foreign callback changed app diagnostics: %v", err)
 	}
-	if _, err := os.Stat(cli.Home); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("hook needed or created client data: %v", err)
-	}
-}
-
-func TestAntigravityCommandApprovalRequiresExplicitSandboxRequest(t *testing.T) {
-	home := t.TempDir()
-	a := newAntigravity(config.Config{StateDir: t.TempDir()}, config.Source{ID: "app", Home: home})
-	for _, tc := range []struct {
-		flag any
-		want int
-	}{{true, 1}, {"true", 1}, {false, 0}, {"false", 0}, {nil, 0}, {"yes", 0}, {1, 0}} {
-		args := map[string]any{"CommandLine": "git commit -m example"}
-		if tc.flag != nil {
-			args["BypassSandbox"] = tc.flag
-		}
-		raw, err := json.Marshal(map[string]any{
-			"hookEventName": "PreToolUse", "conversationId": "chat", "artifactDirectoryPath": filepath.Join(home, "brain", "chat"),
-			"stepIdx": 15, "toolCall": map[string]any{"name": "run_command", "args": args},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, err := a.ParseHook(context.Background(), raw, time.Now())
-		if err != nil || len(got) != tc.want {
-			t.Fatalf("BypassSandbox=%#v: %+v %v", tc.flag, got, err)
-		}
-		if tc.want == 1 && (got[0].Kind != event.ApprovalRequested || got[0].Detail != "申请在沙箱外运行命令。" || got[0].ID != event.SourceEventID("app", "antigravity", "approval_requested", "chat", "step:15")) {
-			t.Fatalf("BypassSandbox=%#v: wrong approval from step: %+v", tc.flag, got[0])
-		}
+	if _, err := os.Stat(app.Home); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("hook created a foreign client home: %v", err)
 	}
 }
 
 func TestAntigravityHookSemantics(t *testing.T) {
 	root := t.TempDir()
+	db := summaryFixture(t, root)
+	execSummary(t, db, "INSERT INTO conversation_summaries (conversation_id) VALUES ('chat')")
 	a := newAntigravity(config.Config{StateDir: filepath.Join(root, "state")}, config.Source{ID: "app", Home: root})
 	for _, tc := range []struct {
 		name, reason, tool string
@@ -128,7 +115,7 @@ func TestAntigravityHookSemantics(t *testing.T) {
 		{"Stop", "model_stop", "", true, event.TurnCompleted}, {"Stop", "ERROR", "", true, event.AttentionRequired},
 		{"Stop", "max_steps_exceeded", "", true, event.AttentionRequired}, {"Stop", "NO_TOOL_CALL", "", false, ""},
 		{"Stop", "USER_CANCELED", "", true, ""}, {"Stop", "CHAINED", "", true, ""},
-		{"PreToolUse", "", "ask_permission", false, event.ApprovalRequested}, {"PreToolUse", "", "run_command", false, ""},
+		{"PreToolUse", "", "ask_permission", false, ""}, {"PreToolUse", "", "run_command", false, ""},
 	} {
 		h := map[string]any{"hookEventName": tc.name, "conversationId": "chat", "transcriptPath": filepath.Join(root, "brain", "chat", ".system_generated", "logs", "transcript.jsonl"),
 			"terminationReason": tc.reason, "fullyIdle": tc.idle, "stepIdx": 5, "toolCall": map[string]any{"name": tc.tool}}

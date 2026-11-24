@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/TeamSillyBees/Blip/internal/antigravity"
 	"github.com/TeamSillyBees/Blip/internal/config"
 	"github.com/TeamSillyBees/Blip/internal/store"
 	"golang.org/x/sys/windows"
@@ -48,6 +50,9 @@ func UpdateSources(ctx context.Context, path string, sources []config.Source, ex
 	if err := writeMetadata(installed); err != nil {
 		return err
 	}
+	if err := prepareSourceDatabases(ctx, plan.Sources); err != nil {
+		return err
+	}
 	for _, target := range sourcePermissionTargets(plan) {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -72,6 +77,29 @@ func UpdateSources(ctx context.Context, path string, sources []config.Source, ex
 		if err := replaceServiceExecutable(ctx, staged, installed.Executable); err != nil {
 			// The original executable is still in place if replacement failed.
 			return errors.Join(err, Start(context.WithoutCancel(ctx), path))
+		}
+	}
+	return nil
+}
+
+func prepareSourceDatabases(ctx context.Context, sources []config.Source) error {
+	for _, source := range sources {
+		if !source.Enabled || source.Harness != "antigravity" {
+			continue
+		}
+		db := filepath.Join(source.Home, antigravity.SummaryFilename)
+		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+			if err := noReparsePoints(db + suffix); err != nil {
+				return err
+			}
+		}
+		if _, err := os.Stat(db); errors.Is(err, os.ErrNotExist) {
+			continue // the client has not created a conversation database yet
+		} else if err != nil {
+			return err
+		}
+		if err := antigravity.PrepareServiceWAL(ctx, db); err != nil {
+			return fmt.Errorf("prepare SQLite files for source %q: %w", source.ID, err)
 		}
 	}
 	return nil
