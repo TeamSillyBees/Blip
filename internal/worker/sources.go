@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"runtime"
 	"time"
 
 	"github.com/TeamSillyBees/Blip/internal/agents"
@@ -31,12 +33,29 @@ func collectSource(ctx context.Context, c config.Config, source config.Source, i
 		report(sourceUpdate{state: "disabled"})
 		return
 	}
-	bindCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	err := agents.Bind(bindCtx, c, source)
-	cancel()
-	if err != nil {
-		report(sourceUpdate{state: "paused", code: "source_binding", err: err})
-		return
+	var lastBindError string
+	for {
+		bindCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err := agents.Bind(bindCtx, c, source)
+		cancel()
+		if err == nil {
+			break
+		}
+		if err.Error() != lastBindError {
+			report(sourceUpdate{state: "paused", code: "source_binding", err: err})
+			lastBindError = err.Error()
+		}
+		// LocalService can start before Antigravity creates its home. The
+		// first client hook restores access. Revalidate the binding before
+		// reading any conversations, just as on an ordinary startup.
+		if runtime.GOOS != "windows" || source.Harness != "antigravity" || !errors.Is(err, os.ErrPermission) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
 	}
 	adapter, err := registry.Open(c, source)
 	if err != nil {
